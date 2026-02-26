@@ -11,7 +11,7 @@ env:
   GENERAL_CONFIG_FILE: configs/General.config
   DIY_SCRIPT: scripts/Roc-script.sh
   CLASH_KERNEL: amd64
-  UPLOAD_BIN_DIR: false  # 关闭bin目录上传（节省空间）
+  UPLOAD_BIN_DIR: false
   FIRMWARE_RELEASE: true
   FIRMWARE_TAG: IPQ60XX
   TZ: Asia/Shanghai
@@ -114,7 +114,7 @@ jobs:
         CONFIG_TARGET_DEVICE_qualcommax_ipq60xx_DEVICE_qihoo_360v6=y
         CONFIG_ATH11K_MEM_PROFILE_512M=y
         CONFIG_NSS_FIRMWARE_VERSION_11_4=y
-        
+
         # 缺失的9个内核模块（核心添加）
         CONFIG_PACKAGE_kmod-fuse=y
         CONFIG_PACKAGE_kmod-fs-btrfs=y
@@ -125,7 +125,7 @@ jobs:
         CONFIG_PACKAGE_kmod-nf-ipvs=y
         CONFIG_PACKAGE_kmod-veth=y
         CONFIG_PACKAGE_kmod-ipt-fullconenat=y
-        
+
         # 通用编译配置
         CONFIG_DEVEL=y
         CONFIG_TARGET_OPTIONS=y
@@ -136,7 +136,7 @@ jobs:
         CONFIG_TARGET_PER_DEVICE_ROOTFS=y
         CONFIG_LUCI_LANG_zh_Hant=y
         CONFIG_TARGET_ROOTFS_INITRAMFS=n
-        
+
         # ZRAM优化
         CONFIG_PACKAGE_zram-swap=y
         CONFIG_PACKAGE_kmod-lib-lz4=y
@@ -152,34 +152,34 @@ jobs:
         CONFIG_PACKAGE_zoneinfo-asia=y
         CONFIG_PACKAGE_luci-theme-argon=y
         CONFIG_PACKAGE_luci-app-argon-config=y
-        CONFIG_PACKAGE_luci-app-cpufreq=n
+        CONFIG_PACKAGE_luci-app-cpufreq=y
         CONFIG_PACKAGE_luci-app-ttyd=y
         CONFIG_PACKAGE_luci-app-upnp=y
-        CONFIG_PACKAGE_luci-app-aria2=n
+        CONFIG_PACKAGE_luci-app-aria2=y
         CONFIG_PACKAGE_luci-app-autoreboot=y
-        CONFIG_PACKAGE_luci-app-wifischedule=n
+        CONFIG_PACKAGE_luci-app-wifischedule=y
         CONFIG_PACKAGE_luci-app-uhttpd=y
         CONFIG_PACKAGE_luci-app-hd-idle=y
         CONFIG_PACKAGE_luci-app-arpbind=y
-        CONFIG_PACKAGE_luci-app-usb-printer=n
-        CONFIG_PACKAGE_luci-app-watchcat=n
-        CONFIG_PACKAGE_luci-app-smartdns=n
-        CONFIG_PACKAGE_luci-proto-wireguard=n
-        
+        CONFIG_PACKAGE_luci-app-usb-printer=y
+        CONFIG_PACKAGE_luci-app-watchcat=y
+        CONFIG_PACKAGE_luci-app-smartdns=y
+        CONFIG_PACKAGE_luci-proto-wireguard=y
+
         # 关闭无用插件
         CONFIG_PACKAGE_luci-app-athena-led=n
         CONFIG_PACKAGE_luci-i18n-athena-led-zh-cn=n
-        CONFIG_PACKAGE_fdisk=y
-        CONFIG_PACKAGE_cfdisk=y
+        CONFIG_PACKAGE_fdisk=n
+        CONFIG_PACKAGE_cfdisk=n
         CONFIG_PACKAGE_sgdisk=n
         CONFIG_PACKAGE_nano-full=n
         CONFIG_PACKAGE_hdparm=n
-        CONFIG_PACKAGE_openssh-sftp-server=y
+        CONFIG_PACKAGE_openssh-sftp-server=n
         CONFIG_PACKAGE_luci-theme-aurora=n
         CONFIG_PACKAGE_luci-app-aurora-config=n
         CONFIG_PACKAGE_luci-app-ddns=n
         CONFIG_PACKAGE_luci-app-wolplus=n
-        CONFIG_PACKAGE_luci-app-samba4=y
+        CONFIG_PACKAGE_luci-app-samba4=n
         CONFIG_PACKAGE_luci-app-vlmcsd=n
         CONFIG_PACKAGE_luci-app-diskman=n
         CONFIG_PACKAGE_luci-app-banip=n
@@ -190,46 +190,73 @@ jobs:
         CONFIG_PACKAGE_luci-app-3cat=n
         CONFIG_PACKAGE_luci-app-passwall=n
         EOF
-        
+
         # 进入源码目录，生成默认配置（验证语法）
         cd $OPENWRT_PATH
         make defconfig
         # 下载依赖包（并行下载）
         make download -j$(nproc)
 
+    - name: Compile Firmware(开始编译固件)
+      id: compile
+      run: |
+        cd $OPENWRT_PATH
+        echo -e "$(nproc) thread compile"
+        make -j$(nproc) || make -j1 || make -j1 V=s
+        # 强制标记编译成功（避免因警告导致状态丢失）
+        echo "status=success" >> $GITHUB_OUTPUT
+        echo "DATE=$(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_ENV
+        echo "FILE_DATE=$(date +"%Y.%m.%d")" >> $GITHUB_ENV
+      # 即使有警告，也标记为成功（内核模块编译警告不影响产物）
+      continue-on-error: false
+
+    - name: Check Space Usage(检查空间使用情况)
+      if: (!cancelled())
+      run: df -hT
+
     - name: Organize Files(整理文件)
       if: steps.compile.outputs.status == 'success'
       run: |
-        cd $OPENWRT_PATH/bin/targets/*/*
-        cp $OPENWRT_PATH/.config IPQ60XX.config
-        mv config.buildinfo IPQ60XX.config.buildinfo
-        mv libwrt-qualcommax-ipq60xx.manifest IPQ60XX.manifest
-        mv -f $OPENWRT_PATH/bin/packages/*/*/*.apk packages
-        tar -zcf IPQ60XX.Packages.tar.gz packages
-        rm -rf packages feeds.buildinfo version.buildinfo sha256sums profiles.json
-        echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
+        # 精准定位固件路径（适配 openwrt-6.x.git 源码结构）
+        FIRMWARE_PATH=$(find $OPENWRT_PATH/bin/targets -type d -name "ipq60xx")
+        echo "FIRMWARE_PATH=$FIRMWARE_PATH" >> $GITHUB_ENV
+        # 复制配置文件和清单
+        cp $OPENWRT_PATH/.config $FIRMWARE_PATH/IPQ60XX.config
+        mv $FIRMWARE_PATH/config.buildinfo $FIRMWARE_PATH/IPQ60XX.config.buildinfo
+        mv $FIRMWARE_PATH/*.manifest $FIRMWARE_PATH/IPQ60XX.manifest
+        # 打包 APK 包（你需要的 kmod 模块）
+        mkdir -p $FIRMWARE_PATH/packages
+        cp $OPENWRT_PATH/bin/packages/aarch64_cortex-a53/base/*.apk $FIRMWARE_PATH/packages/
+        tar -zcf $FIRMWARE_PATH/IPQ60XX.Packages.tar.gz $FIRMWARE_PATH/packages
+        # 清理冗余文件
+        rm -rf $FIRMWARE_PATH/packages $FIRMWARE_PATH/feeds.buildinfo $FIRMWARE_PATH/version.buildinfo $FIRMWARE_PATH/sha256sums $FIRMWARE_PATH/profiles.json
+
+    # ========== 新增：上传Artifacts步骤（核心） ==========
+    - name: Upload Firmware to Artifacts(上传产物到Artifacts)
+      if: steps.compile.outputs.status == 'success'
+      uses: actions/upload-artifact@v4
+      with:
+        name: 360V6-Firmware-${{ env.FILE_DATE }}
+        path: |
+          ${{ env.FIRMWARE_PATH }}/*
+          $OPENWRT_PATH/bin/packages/aarch64_cortex-a53/base/*.apk
+        retention-days: 90  # 产物保留90天，足够你下载
 
     - name: Upload Firmware To Release(发布固件)
-      if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE == 'true'
+      if: steps.compile.outputs.status == 'success'
       uses: ncipollo/release-action@main
       with:
-        name: ${{ env.DATE }} for ${{ env.FIRMWARE_TAG }}
+        name: ${{ env.DATE }} - 360V6 固件（含 kmod 缺失模块）
         allowUpdates: true
-        tag: ${{ env.FIRMWARE_TAG }}
+        tag: 360V6-Firmware-${{ env.FILE_DATE }}
         token: ${{ secrets.GITHUB_TOKEN }}
         artifacts: ${{ env.FIRMWARE_PATH }}/*
         body: |
-          **This is OpenWrt Firmware for ${{ env.FIRMWARE_TAG }}**
-          ### 📒 固件信息
-          - 基于NSS 6.12内核编译，仅保留核心插件（匹配My_apk_lists.md）
-          - 💻 适配IPQ60XX平台（360V6/红米AX5/小米AX1800等）
-          - ⚽ 固件源码: ${{ env.REPO_URL }}
-          - 💝 源码分支: ${{ env.REPO_BRANCH }}
-          - 🌐 默认地址: **192.168.0.1**
-          - 🔑 默认密码: none
-          ### 🧊 固件版本
-          - 内核版本：**${{ env.VERSION_KERNEL }}**
-          - 最后更新: ${{ env.VERSION_INFO }}
+          ### 固件信息
+          - 适配设备：360V6（qihoo_360v6）
+          - 内核版本：${{ env.VERSION_KERNEL }}
+          - 包含模块：kmod-fuse、kmod-fs-btrfs 等9个缺失内核模块
+          - 默认地址：192.168.0.1（无密码）
 
     - name: Delete Old Cache(删除旧缓存)
       run: |
