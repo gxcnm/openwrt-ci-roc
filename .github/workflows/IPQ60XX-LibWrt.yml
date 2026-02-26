@@ -259,7 +259,7 @@ jobs:
           - 适配设备：360V6（qihoo_360v6）
           - 内核版本：${{ env.VERSION_KERNEL }}
           - 包含模块：kmod-fuse、kmod-fs-btrfs 等9个缺失内核模块
-          - 默认地址：192.168.0.1（无密码）
+          - 默认地址：192.168.99.1（无密码）
 
     - name: Delete Old Cache(删除旧缓存)
       run: |
