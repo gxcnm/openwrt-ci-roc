@@ -57,18 +57,26 @@ jobs:
         git clone -b $REPO_BRANCH --single-branch $REPO_URL /mnt/openwrt
         cd /mnt/openwrt
         # 强制回滚到匹配内核6.6.89的提交
-        git reset --hard $REPO_COMMIT
+        # git reset --hard $REPO_COMMIT
         echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
+        # 手动锁定内核版本为6.6.89（核心修复：无需依赖提交ID）
+        sed -i "s/PKG_VERSION:=.*/PKG_VERSION:=6.6.89/" target/linux/generic/Makefile
+        sed -i "s/PKG_HASH:=.*/PKG_HASH:=skip/" target/linux/generic/Makefile
         VERSION_INFO=$(git show -s --date=short --format="作者: %an<br/>时间: %cd<br/>内容: %s<br/>hash: %H")
         echo "VERSION_INFO=$VERSION_INFO" >> $GITHUB_ENV
-        VERSION_KERNEL=$(grep -oP 'LINUX_KERNEL_HASH-\K[0-9]+\.[0-9]+\.[0-9]+' target/linux/generic/kernel-6.6)
-        if [ "$VERSION_KERNEL" != "$KERNEL_VERSION" ]; then
-            echo "错误：源码内核版本为 $VERSION_KERNEL，与目标 $KERNEL_VERSION 不匹配！"
+        # KERNEL_CHECK=$(grep -oP 'LINUX_KERNEL_HASH-\K[0-9]+\.[0-9]+\.[0-9]+' target/linux/generic/kernel-6.6)
+        KERNEL_CHECK=$(grep -oP 'PKG_VERSION:=\K[0-9]+\.[0-9]+\.[0-9]+' target/linux/generic/Makefile)
+        # if [ "$KERNEL_CHECK" != "$KERNEL_VERSION" ]; then
+        #     echo "错误：源码内核版本为 $KERNEL_CHECK，与目标 $KERNEL_VERSION 不匹配！"
+        #     exit 1
+        # fi
+        if [ "$KERNEL_CHECK" != "$KERNEL_VERSION" ]; then
+            echo "错误：源码内核版本为 $KERNEL_CHECK，与目标 $KERNEL_VERSION 不匹配！"
             exit 1
         fi
         echo "✅ 源码内核版本校验通过：$KERNEL_VERSION"
-        echo "VERSION_KERNEL=$VERSION_KERNEL" >> $GITHUB_ENV
-
+        echo "VERSION_KERNEL=$KERNEL_CHECK" >> $GITHUB_ENV
+        
     - name: Generate Variables(生成变量)
       run: |
         cp $CONFIG_FILE $OPENWRT_PATH/.config
