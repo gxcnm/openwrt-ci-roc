@@ -99,7 +99,22 @@ jobs:
               find "$dir" -type f -exec touch {} +
           done
         fi
+    # ========== 新增：缓存下载的依赖包（DL目录） ==========
+    - name: Cache DL Packages(缓存下载的依赖包)
+      uses: actions/cache@main
+      with:
+        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-dl-${{ env.HASH }}-${{ env.CACHE_DATE }}
+        restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-dl-
+        path: ${{ env.OPENWRT_PATH }}/dl
 
+    # ========== 新增：缓存已编译的软件包 ==========
+    - name: Cache Compiled Packages(缓存已编译的软件包)
+      uses: actions/cache@main
+      with:
+        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-packages-${{ env.HASH }}-${{ env.CACHE_DATE }}
+        restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-packages-
+        path: ${{ env.OPENWRT_PATH }}/staging_dir/packages
+        
     - name: Install Feeds(安装feeds)
       run: |
         cd $OPENWRT_PATH
