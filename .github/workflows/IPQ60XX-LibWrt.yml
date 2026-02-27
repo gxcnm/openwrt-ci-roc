@@ -62,8 +62,8 @@ jobs:
         sed -i "s/PKG_HASH:=.*/PKG_HASH:=skip/" target/linux/generic/Makefile
         VERSION_INFO=$(git show -s --date=short --format="作者: %an<br/>时间: %cd<br/>内容: %s<br/>hash: %H")
         echo "VERSION_INFO=$VERSION_INFO" >> $GITHUB_ENV
-        # KERNEL_CHECK=$(grep -oP 'LINUX_KERNEL_HASH-\K[0-9]+\.[0-9]+\.[0-9]+' target/linux/generic/kernel-6.6)
-        KERNEL_CHECK=$(grep -oP 'PKG_VERSION:=\K[0-9]+\.[0-9]+\.[0-9]+' target/linux/generic/Makefile)
+        KERNEL_CHECK=$(grep -oP 'LINUX_KERNEL_HASH-\K[0-9]+\.[0-9]+\.[0-9]+' target/linux/generic/kernel-6.6)
+        # KERNEL_CHECK=$(grep -oP 'PKG_VERSION:=\K[0-9]+\.[0-9]+\.[0-9]+' target/linux/generic/Makefile)
         # if [ "$KERNEL_CHECK" != "$KERNEL_VERSION" ]; then
         #     echo "错误：源码内核版本为 $KERNEL_CHECK，与目标 $KERNEL_VERSION 不匹配！"
         #     exit 1
