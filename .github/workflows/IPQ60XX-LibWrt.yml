@@ -59,7 +59,7 @@ jobs:
         echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
         VERSION_INFO=$(git show -s --date=short --format="作者: %an<br/>时间: %cd<br/>内容: %s<br/>hash: %H")
         echo "VERSION_INFO=$VERSION_INFO" >> $GITHUB_ENV
-        KERNEL_CHECK=$(grep -oP 'LINUX_KERNEL_HASH-\K[0-9]+\.[0-9]+\.[0-9]+' target/linux/generic/kernel-6.6/Makefile)
+        
         # ========== 核心修复：自动检测内核配置文件路径 ==========
         echo "🔍 开始检测内核配置文件路径..."
         # 第一步：列出所有可能的内核版本目录，确认实际存在的路径
