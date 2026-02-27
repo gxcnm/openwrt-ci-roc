@@ -56,8 +56,6 @@ jobs:
         sudo chown -R $(id -u):$(id -g) /mnt/openwrt
         git clone -b $REPO_BRANCH --single-branch $REPO_URL /mnt/openwrt
         cd /mnt/openwrt
-        # 强制回滚到匹配内核6.6.89的提交
-        # git reset --hard $REPO_COMMIT
         echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
         # 手动锁定内核版本为6.6.89（核心修复：无需依赖提交ID）
         sed -i "s/PKG_VERSION:=.*/PKG_VERSION:=6.6.89/" target/linux/generic/Makefile
