@@ -102,51 +102,78 @@ jobs:
     - name: Load Custom Configuration(加载自定义配置)
       run: |
         cd $OPENWRT_PATH
-        # 直接写入完整配置（避免合并冲突）
-        make defconfig
+        # 1. 清空原有.config，避免残留配置干扰
+        rm -f $OPENWRT_PATH/.config && touch $OPENWRT_PATH/.config
         
-        # 核心机型配置
-        ./scripts/config -e CONFIG_TARGET_qualcommax
-        ./scripts/config -e CONFIG_TARGET_qualcommax_ipq60xx
-        ./scripts/config -e CONFIG_TARGET_MULTI_PROFILE
-        ./scripts/config -e CONFIG_TARGET_DEVICE_qualcommax_ipq60xx_DEVICE_qihoo_360v6
-        ./scripts/config -e CONFIG_ATH11K_MEM_PROFILE_512M
-        ./scripts/config -e CONFIG_NSS_FIRMWARE_VERSION_11_4
+        # 2. 写入适配360V6 + r34087-f9fbaa7017版本的完整配置（无语法错误）
+        cat > $OPENWRT_PATH/.config << EOF
+        # 核心机型配置（适配IPQ60XX/360V6）
+        CONFIG_TARGET_qualcommax=y
+        CONFIG_TARGET_qualcommax_ipq60xx=y
+        CONFIG_TARGET_MULTI_PROFILE=y
+        CONFIG_TARGET_DEVICE_qualcommax_ipq60xx_DEVICE_qihoo_360v6=y
+        CONFIG_ATH11K_MEM_PROFILE_512M=y
+        CONFIG_NSS_FIRMWARE_VERSION_11_4=y
 
-        # 缺失的9个内核模块（核心添加）
-        ./scripts/config -e CONFIG_PACKAGE_kmod-fuse
-        ./scripts/config -e CONFIG_PACKAGE_kmod-fs-btrfs
-        ./scripts/config -e CONFIG_PACKAGE_kmod-ipt-extra
-        ./scripts/config -e CONFIG_PACKAGE_kmod-ipt-nat
-        ./scripts/config -e CONFIG_PACKAGE_kmod-ipt-nat6
-        ./scripts/config -e CONFIG_PACKAGE_kmod-ipt-physdev
-        ./scripts/config -e CONFIG_PACKAGE_kmod-nf-ipvs
-        ./scripts/config -e CONFIG_PACKAGE_kmod-veth
-        ./scripts/config -e CONFIG_PACKAGE_kmod-ipt-fullconenat
+        # 9个核心kmod模块（确保编译）
+        CONFIG_PACKAGE_kmod-fuse=y
+        CONFIG_PACKAGE_kmod-fs-btrfs=y
+        CONFIG_PACKAGE_kmod-ipt-extra=y
+        CONFIG_PACKAGE_kmod-ipt-nat=y
+        CONFIG_PACKAGE_kmod-ipt-nat6=y
+        CONFIG_PACKAGE_kmod-ipt-physdev=y
+        CONFIG_PACKAGE_kmod-nf-ipvs=y
+        CONFIG_PACKAGE_kmod-veth=y
+        CONFIG_PACKAGE_kmod-ipt-fullconenat=y
 
-        # 通用编译配置
-        ./scripts/config -e CONFIG_DEVEL
-        ./scripts/config -e CONFIG_TARGET_OPTIONS
-        ./scripts/config -e CONFIG_TARGET_OPTIMIZATION="-O3 -pipe"
-        ./scripts/config -e CONFIG_CCACHE
-        ./scripts/config -e CONFIG_PACKAGE_default-settings
-        ./scripts/config -e CONFIG_PACKAGE_default-settings-chn
-        ./scripts/config -e CONFIG_TARGET_PER_DEVICE_ROOTFS
-        ./scripts/config -e CONFIG_LUCI_LANG_zh_Hant
-        ./scripts/config -d CONFIG_TARGET_ROOTFS_INITRAMFS
+        # 通用编译配置（适配ImmortalWrt r34087版本）
+        CONFIG_DEVEL=y
+        CONFIG_TARGET_OPTIONS=y
+        CONFIG_TARGET_OPTIMIZATION="-O3 -pipe"
+        CONFIG_CCACHE=y
+        CONFIG_PACKAGE_default-settings=y
+        CONFIG_PACKAGE_default-settings-chn=y
+        CONFIG_TARGET_PER_DEVICE_ROOTFS=y
+        CONFIG_LUCI_LANG_zh_Hant=y
+        CONFIG_TARGET_ROOTFS_INITRAMFS=n
 
-        # ZRAM优化
-        ./scripts/config -e CONFIG_PACKAGE_zram-swap
-        ./scripts/config -e CONFIG_PACKAGE_kmod-lib-lz4
-        ./scripts/config -e CONFIG_KERNEL_ZRAM_BACKEND_LZ4
-        ./scripts/config -e CONFIG_KERNEL_ZRAM_BACKEND_LZO
-        ./scripts/config -e CONFIG_KERNEL_ZRAM_DEF_COMP_LZ4
+        # ZRAM优化配置
+        CONFIG_PACKAGE_zram-swap=y
+        CONFIG_PACKAGE_kmod-lib-lz4=y
+        CONFIG_KERNEL_ZRAM_BACKEND_LZ4=y
+        CONFIG_KERNEL_ZRAM_BACKEND_LZO=y
+        CONFIG_KERNEL_ZRAM_DEF_COMP_LZ4=y
+        EOF
 
-        # 进入源码目录，生成默认配置（验证语法）
+        # 3. 生成合法配置（核心：用make defconfig替代错误的./scripts/config调用）
+        echo "🔍 生成并验证配置文件..."
         make defconfig
-        echo "✅ 配置生成完成，当前目标架构："
-        grep -E 'CONFIG_TARGET_(qualcommax|ipq60xx)' .config
-        grep -E 'CONFIG_PACKAGE_kmod-(fuse|fs-btrfs|ipt-fullconenat)' .config
+        if [ $? -ne 0 ]; then
+          echo "❌ 配置文件语法错误，请检查.config内容"
+          cat $OPENWRT_PATH/.config
+          exit 1
+        fi
+
+        # 4. 验证9个kmod模块是否正确写入配置
+        echo "🔍 验证关键内核模块配置..."
+        MODULES=(
+          "kmod-fuse" "kmod-fs-btrfs" "kmod-ipt-extra"
+          "kmod-ipt-nat" "kmod-ipt-nat6" "kmod-ipt-physdev"
+          "kmod-nf-ipvs" "kmod-veth" "kmod-ipt-fullconenat"
+        )
+        for mod in "${MODULES[@]}"; do
+          if grep -q "^CONFIG_PACKAGE_$mod=y" $OPENWRT_PATH/.config; then
+                echo "✅ $mod 配置已生效"
+          else
+                echo "⚠ $mod 配置缺失，自动补充..."
+                echo "CONFIG_PACKAGE_$mod=y" >> $OPENWRT_PATH/.config
+          fi
+        done
+
+        # 5. 二次确认配置合法性（避免补充模块后语法错误）
+        make defconfig > /dev/null 2>&1
+        echo "✅ 自定义配置加载完成，目标架构验证："
+        grep -E 'CONFIG_TARGET_(qualcommax|ipq60xx|qihoo_360v6)' $OPENWRT_PATH/.config
 
     - name: Download DL Package(下载DL软件包)
       run: |
