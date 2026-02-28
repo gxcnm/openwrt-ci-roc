@@ -7,7 +7,7 @@ on:
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
   REPO_BRANCH: openwrt-23.05
-  REPO_COMMIT: ''
+  REPO_COMMIT: f9fbaa7017
   CONFIG_FILE: configs/IPQ60XX.config
   GENERAL_CONFIG_FILE: configs/General.config
   DIY_SCRIPT: scripts/Roc-script.sh
@@ -58,39 +58,12 @@ jobs:
         df -hT $GITHUB_WORKSPACE
         sudo mkdir -p /mnt/openwrt
         sudo chown -R $(id -u):$(id -g) /mnt/openwrt
-        git clone -b $REPO_BRANCH --single-branch $REPO_URL /mnt/openwrt
+        git clone $REPO_URL /mnt/openwrt
         cd /mnt/openwrt
+        git checkout f9fbaa7017
         echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
         VERSION_INFO=$(git show -s --date=short --format="作者: %an<br/>时间: %cd<br/>内容: %s<br/>hash: %H")
         echo "VERSION_INFO=$VERSION_INFO" >> $GITHUB_ENV
-        # 仅获取HASH，其他变量已在env中固化
-        echo "HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
-        
-        # ========== 修复：适配文件/目录两种情况，锁定6.6.89内核 ==========
-        echo "🔍 检测内核配置文件..."
-        # 第一步：兼容文件（kernel-6.6）和目录（kernel-6.6）两种情况
-        KERNEL_FILE=$(find target/linux/generic/ -type f -name "kernel-6.6*" | head -1)
-        KERNEL_DIR=$(find target/linux/generic/ -type d -name "kernel-6.6*" | head -1)
-        
-        # 第二步：优先用目录，无目录则用文件，锁定6.6.89内核
-        if [ -n "$KERNEL_DIR" ]; then
-            # 目录场景：修改Makefile锁定版本
-            KERNEL_MAKEFILE="$KERNEL_DIR/Makefile"
-            sed -i "s/PKG_VERSION:=.*/PKG_VERSION:=6.6.89/" "$KERNEL_MAKEFILE"
-            sed -i "s/PKG_HASH:=.*/PKG_HASH:=skip/" "$KERNEL_MAKEFILE"
-            VERSION_KERNEL="6.6.89"
-        elif [ -n "$KERNEL_FILE" ]; then
-            # 文件场景：直接修改内核版本文件
-            sed -i "s/^.*/6.6.89/" "$KERNEL_FILE"
-            VERSION_KERNEL="6.6.89"
-        else
-            # 无6.6相关文件/目录：手动创建kernel-6.6文件并指定版本
-            echo "6.6.89" > target/linux/generic/kernel-6.6
-            VERSION_KERNEL="6.6.89"
-        fi
-        
-        echo "✅ 已强制锁定内核版本为：$VERSION_KERNEL"
-        echo "VERSION_KERNEL=$VERSION_KERNEL" >> $GITHUB_ENV
         
     - name: Generate Variables(生成变量)
       run: |
@@ -99,15 +72,15 @@ jobs:
         echo "SOURCE_REPO=immortalwrt" >> $GITHUB_ENV
         echo "DEVICE_TARGET=qualcommax" >> $GITHUB_ENV
         echo "DEVICE_SUBTARGET=ipq60xx" >> $GITHUB_ENV
-        echo "HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
+        echo "HASH=f9fbaa7017" >> $GITHUB_ENV
         echo "CACHE_DATE=$(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_ENV
 
     - name: Cache Toolchain(缓存工具链)
       uses: actions/cache@main
       with:
-        # 简化Key：仅保留固定标识+HASH，去掉易变的时间戳，确保后续能命中
-        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}
-        restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-
+        # 简化Key：仅保留固定标识
+        key: immortalwrt-openwrt-23.05-qualcommax-ipq60xx-f9fbaa7017
+        restore-keys: immortalwrt-openwrt-23.05-qualcommax-ipq60xx-
         path: |
           ${{ env.OPENWRT_PATH }}/.ccache
           ${{ env.OPENWRT_PATH }}/staging_dir/toolchain-*
@@ -187,16 +160,16 @@ jobs:
     - name: Cache DL Packages(缓存下载的依赖包)
       uses: actions/cache@main
       with:
-        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-dl-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}
-        restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-dl-${{ env.DEVICE_TARGET }}-
+        key: immortalwrt-openwrt-23.05-dl-qualcommax-ipq60xx-f9fbaa7017
+        restore-keys: immortalwrt-openwrt-23.05-dl-qualcommax-ipq60xx-
         path: ${{ env.OPENWRT_PATH }}/dl
 
     # ========== 新增：缓存已编译的软件包 ==========
     - name: Cache Compiled Packages(缓存已编译的软件包)
       uses: actions/cache@main
       with:
-        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-packages-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}
-        restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-packages-${{ env.DEVICE_TARGET }}-
+        key: immortalwrt-openwrt-23.05-packages-qualcommax-ipq60xx-f9fbaa7017
+        restore-keys: immortalwrt-openwrt-23.05-packages-qualcommax-ipq60xx-
         path: ${{ env.OPENWRT_PATH }}/staging_dir/packages
 
     - name: Compile Firmware(开始编译固件)
@@ -215,6 +188,28 @@ jobs:
     - name: Check Space Usage(检查空间使用情况)
       if: (!cancelled())
       run: df -hT
+
+    - name: Verify Kmod Files(验证内核模块文件)
+      if: steps.compile.outputs.status == 'success'
+      run: |
+        cd $OPENWRT_PATH
+        # 检查9个kmod的apk文件是否存在
+        MODULES=(
+          "kmod-fuse" "kmod-fs-btrfs" "kmod-ipt-extra"
+          "kmod-ipt-nat" "kmod-ipt-nat6" "kmod-ipt-physdev"
+          "kmod-nf-ipvs" "kmod-veth" "kmod-ipt-fullconenat"
+        )
+        for mod in "${MODULES[@]}"; do
+          APK_FILE=$(find bin/packages -name "$mod*.apk")
+          if [ -f "$APK_FILE" ]; then
+            echo "✅ $mod 编译成功：$APK_FILE"
+            # 验证apk兼容性（内核版本匹配）
+            opkg info --force-root "$APK_FILE" | grep -E "Version|Architecture|Depends"
+          else
+            echo "❌ $mod 编译失败，无产物文件"
+            exit 1
+          fi
+        done
 
     - name: Organize Files(整理文件)
       if: steps.compile.outputs.status == 'success'
