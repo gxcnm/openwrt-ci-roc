@@ -5,15 +5,15 @@ on:
   workflow_call:
 
 env:
-  REPO_URL: https://github.com/immortalwrt/immortalwrt
-  REPO_BRANCH: openwrt-23.05
-  REPO_COMMIT: ''
+  REPO_URL: https://github.com/laipeng668/openwrt-6.x.git
+  REPO_BRANCH: main-nss
+  CONFIG_FILE: configs/IPQ60XX.config
+  GENERAL_CONFIG_FILE: configs/General.config
   DIY_SCRIPT: scripts/Roc-script.sh
   CLASH_KERNEL: amd64
   UPLOAD_BIN_DIR: false
   FIRMWARE_RELEASE: true
   FIRMWARE_TAG: IPQ60XX
-  KERNEL_VERSION: 6.6.89
   TZ: Asia/Shanghai
 
 jobs:
@@ -23,125 +23,251 @@ jobs:
     steps:
     - name: Check Server Performance(检查服务器性能)
       run: |
-        echo "警告⚠ 分配的服务器性能有限，若选择的插件过多，务必注意CPU性能！"
+        echo "警告⚠"
+        echo "分配的服务器性能有限，若选择的插件过多，务必注意CPU性能！"
         echo -e "已知CPU型号（降序）：7763，8370C，8272CL，8171M，E5-2673 \n"
-        cat /proc/cpuinfo | grep -E 'physical id|model name' | head -10
-        free -h
-        df -hT
+        echo "--------------------------CPU信息--------------------------"
+        echo "CPU物理数量：$(cat /proc/cpuinfo | grep "physical id" | sort | uniq | wc -l)"
+        echo -e "CPU核心信息：$(cat /proc/cpuinfo | grep name | cut -f2 -d: | uniq -c) \n"
+        echo "--------------------------内存信息--------------------------"
+        echo "已安装内存详细信息："
+        echo -e "$(sudo lshw -short -C memory | grep GiB) \n"
+        echo "--------------------------硬盘信息--------------------------"
+        echo "硬盘数量：$(ls /dev/sd* | grep -v [1-9] | wc -l)" && df -hT
 
     - name: Initialization Environment(初始化环境)
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo -E apt update -y && sudo -E apt full-upgrade -y
-        sudo -E apt install -y $(curl -fsSL ophub.org/ubuntu2404-make-openwrt-depends)
+        sudo -E apt-get -y update
+        sudo -E apt-get -y install $(curl -fsSL ophub.org/ubuntu2404-make-openwrt-depends)
         sudo -E systemctl daemon-reload
-        sudo -E timedatectl set-timezone $TZ
+        sudo timedatectl set-timezone "$TZ"
 
     - name: Checkout(检出代码)
       uses: actions/checkout@main
 
-    - name: Clone Source Code(克隆源代码&锁定6.6.89内核)
+    - name: Clone Source Code(克隆源代码)
       run: |
-        sudo mkdir -p /mnt/openwrt && sudo chown -R $USER:$USER /mnt/openwrt
-        git clone -b $REPO_BRANCH --single-branch $REPO_URL /mnt/openwrt
+        df -hT $GITHUB_WORKSPACE
+        sudo mkdir -p /mnt/openwrt
+        sudo chown -R $(id -u):$(id -g) /mnt/openwrt
+        git clone --depth 1 -b $REPO_BRANCH --single-branch $REPO_URL /mnt/openwrt
         cd /mnt/openwrt
         echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
-        VERSION_INFO=$(git show -s --date=short --format="作者: %an<br/>时间: %cd<br/>内容: %s<br/>hash: %h")
+        VERSION_INFO=$(git show -s --date=short --format="作者: %an<br/>时间: %cd<br/>内容: %s<br/>hash: %H")
         echo "VERSION_INFO=$VERSION_INFO" >> $GITHUB_ENV
+        VERSION_KERNEL=$(grep -oP 'LINUX_KERNEL_HASH-\K[0-9]+\.[0-9]+\.[0-9]+' target/linux/generic/kernel-6.12)
+        echo "VERSION_KERNEL=$VERSION_KERNEL" >> $GITHUB_ENV
 
-        # 自动检测并锁定6.6.89内核版本
-        echo "🔍 检测并锁定6.6内核版本..."
-        KERNEL_FILE=$(find target/linux/generic/ -type f -name "kernel-6.6*" | head -1)
-        KERNEL_DIR=$(find target/linux/generic/ -type d -name "kernel-6.6*" | head -1)
-        if [ -n "$KERNEL_DIR" ]; then
-            sed -i "s/PKG_VERSION:=.*/PKG_VERSION:=6.6.89/" $KERNEL_DIR/Makefile
-            sed -i "s/PKG_HASH:=.*/PKG_HASH:=skip/" $KERNEL_DIR/Makefile
-        elif [ -n "$KERNEL_FILE" ]; then
-            sed -i "s/^.*/6.6.89/" $KERNEL_FILE
-        else
-            echo "6.6.89" > target/linux/generic/kernel-6.6
-        fi
-        echo "✅ 已强制锁定内核版本为：${KERNEL_VERSION}"
-        echo "VERSION_KERNEL=${KERNEL_VERSION}" >> $GITHUB_ENV
-
-    - name: Define Env Variables(定义环境变量-无配置干扰)
+    - name: Generate Variables(生成变量)
       run: |
+        cp $CONFIG_FILE $OPENWRT_PATH/.config
         cd $OPENWRT_PATH
-        # 直接手动定义目标架构变量，避免读取错误配置
-        echo "SOURCE_REPO=immortalwrt" >> $GITHUB_ENV
-        echo "DEVICE_TARGET=qualcommax" >> $GITHUB_ENV
-        echo "DEVICE_SUBTARGET=ipq60xx" >> $GITHUB_ENV
+        make defconfig > /dev/null 2>&1
+        SOURCE_REPO="$(echo $REPO_URL | awk -F '/' '{print $(NF)}')"
+        echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_ENV
+        DEVICE_TARGET=$(cat .config | grep CONFIG_TARGET_BOARD | awk -F '"' '{print $2}')
+        echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_ENV
+        DEVICE_SUBTARGET=$(cat .config | grep CONFIG_TARGET_SUBTARGET | awk -F '"' '{print $2}')
+        echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_ENV
         echo "HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
         echo "CACHE_DATE=$(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_ENV
 
-    - name: Cache Toolchain(缓存工具链-仅保留核心路径)
+    - name: Cache Toolchain(缓存工具链)
       uses: actions/cache@main
       with:
-        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ env.HASH }}-${{ env.CACHE_DATE }}
+        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ env.HASH }} ${{ env.CACHE_DATE }}
         restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-
         path: |
           ${{ env.OPENWRT_PATH }}/.ccache
-          ${{ env.OPENWRT_PATH }}/staging_dir/toolchain-*
+          ${{ env.OPENWRT_PATH }}/staging_dir
 
-    - name: Refresh Toolchain Cache(刷新工具链缓存)
+    - name: Refresh The Cache(刷新缓存)
       run: |
         if [ -d "$OPENWRT_PATH/staging_dir" ]; then
-          find $OPENWRT_PATH/staging_dir -type d -name "stamp" -not -path "*target*" | xargs -I {} find {} -type f -exec touch {} \;
+          find "$OPENWRT_PATH/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r dir; do
+              find "$dir" -type f -exec touch {} +
+          done
         fi
 
-    - name: Install Feeds(更新并安装feeds)
+    - name: Install Feeds(安装feeds)
       run: |
         cd $OPENWRT_PATH
-        ./scripts/feeds update -a && ./scripts/feeds install -a
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+  
+    - name: Load Custom Configuration(加载自定义配置)
+      run: |
+        chmod +x $DIY_SCRIPT
+        cd $OPENWRT_PATH
+        $GITHUB_WORKSPACE/$DIY_SCRIPT
 
-    - name: Load Custom Configuration(写入360V6完整配置-核心)
+    - name: Download DL Package(下载DL软件包)
       run: |
+        # 直接写入完整配置（避免合并冲突）
+        cat > $OPENWRT_PATH/.config << EOF
+        # 核心机型配置
+        CONFIG_TARGET_qualcommax=y
+        CONFIG_TARGET_qualcommax_ipq60xx=y
+        CONFIG_TARGET_MULTI_PROFILE=y
+        CONFIG_TARGET_DEVICE_qualcommax_ipq60xx_DEVICE_qihoo_360v6=y
+        CONFIG_ATH11K_MEM_PROFILE_512M=y
+        CONFIG_NSS_FIRMWARE_VERSION_11_4=y
+
+        # 缺失的9个内核模块（核心添加）
+        CONFIG_PACKAGE_kmod-fuse=y
+        CONFIG_PACKAGE_kmod-fs-btrfs=y
+        CONFIG_PACKAGE_kmod-ipt-extra=y
+        CONFIG_PACKAGE_kmod-ipt-nat=y
+        CONFIG_PACKAGE_kmod-ipt-nat6=y
+        CONFIG_PACKAGE_kmod-ipt-physdev=y
+        CONFIG_PACKAGE_kmod-nf-ipvs=y
+        CONFIG_PACKAGE_kmod-veth=y
+        CONFIG_PACKAGE_kmod-ipt-fullconenat=y
+
+        # 通用编译配置
+        CONFIG_DEVEL=y
+        CONFIG_TARGET_OPTIONS=y
+        CONFIG_TARGET_OPTIMIZATION="-O3 -pipe -march=armv8-a+crypto+crc -mcpu=cortex-a53+crypto+crc -mtune=cortex-a53"
+        CONFIG_CCACHE=y
+        CONFIG_PACKAGE_default-settings=y
+        CONFIG_PACKAGE_default-settings-chn=y
+        CONFIG_TARGET_PER_DEVICE_ROOTFS=y
+        CONFIG_LUCI_LANG_zh_Hant=y
+        CONFIG_TARGET_ROOTFS_INITRAMFS=n
+
+        # ZRAM优化
+        CONFIG_PACKAGE_zram-swap=y
+        CONFIG_PACKAGE_kmod-lib-lz4=y
+        CONFIG_KERNEL_ZRAM_BACKEND_LZ4=y
+        CONFIG_KERNEL_ZRAM_BACKEND_LZO=y
+        CONFIG_KERNEL_ZRAM_DEF_COMP_LZ4=y
+
+        # 保留的插件（匹配My_apk_lists.md）
+        CONFIG_PACKAGE_btop=y
+        CONFIG_PACKAGE_tune2fs=y
+        CONFIG_PACKAGE_fstrim=y
+        CONFIG_PACKAGE_smartmontools-drivedb=n
+        CONFIG_PACKAGE_smartmontools=n
+        CONFIG_PACKAGE_zoneinfo-asia=y
+        CONFIG_PACKAGE_luci-theme-argon=y
+        CONFIG_PACKAGE_luci-app-argon-config=y
+        CONFIG_PACKAGE_luci-app-cpufreq=n
+        CONFIG_PACKAGE_luci-app-ttyd=y
+        CONFIG_PACKAGE_luci-app-upnp=y
+        CONFIG_PACKAGE_luci-app-aria2=n
+        CONFIG_PACKAGE_luci-app-autoreboot=y
+        CONFIG_PACKAGE_luci-app-wifischedule=n
+        CONFIG_PACKAGE_luci-app-uhttpd=y
+        CONFIG_PACKAGE_luci-app-hd-idle=y
+        CONFIG_PACKAGE_luci-app-arpbind=y
+        CONFIG_PACKAGE_luci-app-usb-printer=n
+        CONFIG_PACKAGE_luci-app-watchcat=n
+        CONFIG_PACKAGE_luci-app-smartdns=n
+        CONFIG_PACKAGE_luci-proto-wireguard=n
+        CONFIG_PACKAGE_kmod-wireguard=n
+        CONFIG_PACKAGE_wireguard-tools=n
+
+        # 关闭无用插件
+        CONFIG_PACKAGE_luci-app-athena-led=n
+        CONFIG_PACKAGE_luci-i18n-athena-led-zh-cn=n
+        CONFIG_PACKAGE_fdisk=y
+        CONFIG_PACKAGE_cfdisk=y
+        CONFIG_PACKAGE_sgdisk=n
+        CONFIG_PACKAGE_nano-full=n
+        CONFIG_PACKAGE_hdparm=n
+        CONFIG_PACKAGE_openssh-sftp-server=n
+        CONFIG_PACKAGE_luci-theme-aurora=y
+        CONFIG_PACKAGE_luci-app-aurora-config=y
+        CONFIG_PACKAGE_luci-app-ddns=n
+        CONFIG_PACKAGE_luci-app-wolplus=n
+        CONFIG_PACKAGE_luci-app-samba4=y
+        CONFIG_PACKAGE_luci-app-vlmcsd=n
+        CONFIG_PACKAGE_luci-app-diskman=n
+        CONFIG_PACKAGE_luci-app-banip=n
+        CONFIG_PACKAGE_luci-app-acme=n
+        CONFIG_PACKAGE_luci-app-oaf=n
+        CONFIG_PACKAGE_luci-app-sqm=n
+        CONFIG_PACKAGE_luci-app-wechatpush=n
+        CONFIG_PACKAGE_luci-app-3cat=n
+        CONFIG_PACKAGE_luci-app-passwall=n
+        EOF
+
+        # 进入源码目录，生成默认配置（验证语法）
         cd $OPENWRT_PATH
-        # 直接写入qualcommax/ipq60xx（360V6）完整配置，无任何空配置干扰
-        cat > .config << EOF
-CONFIG_TARGET_qualcommax=y
-CONFIG_TARGET_qualcommax_ipq60xx=y
-CONFIG_TARGET_qualcommax_ipq60xx_DEVICE_qihoo_360v6=y
-CONFIG_ATH11K_MEM_PROFILE_512M=y
-CONFIG_NSS_FIRMWARE_VERSION_11_4=y
-# 需编译的9个内核模块
-CONFIG_PACKAGE_kmod-fuse=y
-CONFIG_PACKAGE_kmod-fs-btrfs=y
-CONFIG_PACKAGE_kmod-ipt-extra=y
-CONFIG_PACKAGE_kmod-ipt-nat=y
-CONFIG_PACKAGE_kmod-ipt-nat6=y
-CONFIG_PACKAGE_kmod-ipt-physdev=y
-CONFIG_PACKAGE_kmod-nf-ipvs=y
-CONFIG_PACKAGE_kmod-veth=y
-CONFIG_PACKAGE_kmod-ipt-fullconenat=y
-# 通用编译配置-仅保留安全优化
-CONFIG_DEVEL=y
-CONFIG_TARGET_OPTIONS=y
-CONFIG_TARGET_OPTIMIZATION="-O3 -pipe"
-CONFIG_CCACHE=y
-CONFIG_PACKAGE_default-settings=y
-CONFIG_PACKAGE_default-settings-chn=y
-CONFIG_TARGET_PER_DEVICE_ROOTFS=y
-CONFIG_LUCI_LANG_zh_Hant=y
-CONFIG_TARGET_ROOTFS_INITRAMFS=n
-# ZRAM优化
-CONFIG_PACKAGE_zram-swap=y
-CONFIG_PACKAGE_kmod-lib-lz4=y
-CONFIG_KERNEL_ZRAM_BACKEND_LZ4=y
-CONFIG_KERNEL_ZRAM_BACKEND_LZO=y
-CONFIG_KERNEL_ZRAM_DEF_COMP_LZ4=y
-EOF
-        # 生成配置，确认目标架构为qualcommax/ipq60xx
         make defconfig
-        echo "✅ 配置生成完成，当前目标架构："
-        grep -E 'CONFIG_TARGET_(qualcommax|ipq60xx)' .config
+        # 下载依赖包（并行下载）
+        make download -j$(nproc)
 
-    - name: Download Dependencies(下载依赖包)
+    - name: Compile Firmware(开始编译固件)
+      id: compile
       run: |
         cd $OPENWRT_PATH
-        make download -j$(nproc)
-        # 清理下载缓存中的冗余文件
-        find dl -type f -name "*.hash" -delete
+        echo -e "$(nproc) thread compile"
+        make -j$(nproc) || make -j1 || make -j1 V=s
+        # 强制标记编译成功（避免因警告导致状态丢失）
+        echo "status=success" >> $GITHUB_OUTPUT
+        echo "DATE=$(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_ENV
+        echo "FILE_DATE=$(date +"%Y.%m.%d")" >> $GITHUB_ENV
+      # 即使有警告，也标记为成功（内核模块编译警告不影响产物）
+      continue-on-error: false
 
-    - name: Cache Downloa
+    - name: Check Space Usage(检查空间使用情况)
+      if: (!cancelled())
+      run: df -hT
+
+    - name: Organize Files(整理文件)
+      if: steps.compile.outputs.status == 'success'
+      run: |
+        # 精准定位固件路径（适配 openwrt-6.x.git 源码结构）
+        FIRMWARE_PATH=$(find $OPENWRT_PATH/bin/targets -type d -name "ipq60xx")
+        echo "FIRMWARE_PATH=$FIRMWARE_PATH" >> $GITHUB_ENV
+        # 复制配置文件和清单
+        cp $OPENWRT_PATH/.config $FIRMWARE_PATH/IPQ60XX.config
+        mv $FIRMWARE_PATH/config.buildinfo $FIRMWARE_PATH/IPQ60XX.config.buildinfo
+        mv $FIRMWARE_PATH/*.manifest $FIRMWARE_PATH/IPQ60XX.manifest
+        # 打包 APK 包（你需要的 kmod 模块）
+        mkdir -p $FIRMWARE_PATH/packages
+        cp $OPENWRT_PATH/bin/packages/aarch64_cortex-a53/base/*.apk $FIRMWARE_PATH/packages/
+        tar -zcf $FIRMWARE_PATH/IPQ60XX.Packages.tar.gz $FIRMWARE_PATH/packages
+        # 清理冗余文件
+        rm -rf $FIRMWARE_PATH/packages $FIRMWARE_PATH/feeds.buildinfo $FIRMWARE_PATH/version.buildinfo $FIRMWARE_PATH/sha256sums $FIRMWARE_PATH/profiles.json
+
+    # ========== 新增：上传Artifacts步骤（核心） ==========
+    - name: Upload Firmware to Artifacts(上传产物到Artifacts)
+      if: steps.compile.outputs.status == 'success'
+      uses: actions/upload-artifact@v4
+      with:
+        name: 360V6-Firmware-${{ env.FILE_DATE }}
+        path: |
+          ${{ env.FIRMWARE_PATH }}/*
+          $OPENWRT_PATH/bin/packages/aarch64_cortex-a53/base/*.apk
+        retention-days: 90  # 产物保留90天，足够你下载
+
+    - name: Upload Firmware To Release(发布固件)
+      if: steps.compile.outputs.status == 'success'
+      uses: ncipollo/release-action@main
+      with:
+        name: ${{ env.DATE }} - 360V6 固件（含 kmod 缺失模块）
+        allowUpdates: true
+        tag: 360V6-Firmware-${{ env.FILE_DATE }}
+        token: ${{ secrets.GITHUB_TOKEN }}
+        artifacts: ${{ env.FIRMWARE_PATH }}/*
+        body: |
+          ### 固件信息
+          - 适配设备：360V6（qihoo_360v6）
+          - 内核版本：${{ env.VERSION_KERNEL }}
+          - 包含模块：kmod-fuse、kmod-fs-btrfs 等9个缺失内核模块
+          - 默认地址：192.168.99.1（无密码）
+
+    - name: Delete Old Cache(删除旧缓存)
+      run: |
+        gh cache list --key ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}- --json key --jq '.[] | .key' | while read -r key; do
+          gh cache delete "$key"
+        done
+        echo "========cache status========"
+        echo "ccache: $(du -sh $OPENWRT_PATH/.ccache | cut -f 1)"
+        echo "staging: $(du -sh $OPENWRT_PATH/staging_dir | cut -f 1)"
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
