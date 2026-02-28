@@ -6,7 +6,7 @@ on:
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
-  REPO_BRANCH: master
+  REPO_BRANCH: ''
   REPO_COMMIT: f9fbaa7017
   CONFIG_FILE: configs/IPQ60XX.config
   GENERAL_CONFIG_FILE: configs/General.config
@@ -58,37 +58,59 @@ jobs:
         df -hT $GITHUB_WORKSPACE
         sudo mkdir -p /mnt/openwrt
         sudo chown -R $(id -u):$(id -g) /mnt/openwrt
-        git clone -b $REPO_BRANCH $REPO_URL /mnt/openwrt
+        git clone --no-single-branch --depth=1000 $REPO_URL /mnt/openwrt
         cd /mnt/openwrt
-        # 切换到目标Commit（f9fbaa7017）
-        if [ -n "$REPO_COMMIT" ]; then
-          git checkout $REPO_COMMIT
-          echo "✅ 已切换到目标Commit：$REPO_COMMIT"
+        # ========== 第二步：先执行调试（核心！切换Commit前先看关键信息） ==========
+        echo -e "\n===== 调试信息：仓库基础信息 ====="
+        echo "📌 仓库远程地址：$(git remote -v)"
+        echo "📌 仓库所有远程分支列表："
+        git branch -r
+        echo -e "\n📌 包含 'f9f' 关键词的Commit（前20个）："
+        git log --all --oneline | grep -i "f9f" -m 20 || echo "❌ 未找到任何包含f9f的Commit"
+        echo -e "\n📌 包含 'r34087' 关键词的Commit（前5个）："
+        git log --all --oneline | grep -i "r34087" -m 5 || echo "❌ 未找到任何包含r34087的Commit"
+        echo -e "\n📌 仓库最新10个Commit（所有分支）："
+        git log --all --oneline -n 10
+
+        # ========== 第三步：尝试切换Commit（带验证） ==========
+        git fetch --all
+        FULL_HASH=$(git rev-parse --short=10 $REPO_COMMIT 2>/dev/null)
+        if [ -z "$FULL_HASH" ]; then
+          echo "❌ 错误：简写Hash $REPO_COMMIT 无法解析，尝试全仓库搜索..."
+          # 第二步：全仓库搜索该Hash（跨所有分支）
+          FULL_HASH=$(git log --all --pretty=format:"%H" | grep -i "$REPO_COMMIT" | head -1)
+          if [ -z "$FULL_HASH" ]; then
+            echo "❌ 致命错误：Commit $REPO_COMMIT 在仓库中不存在！"
+            echo "🔍 仓库所有分支的最近10个Commit（便于核对）："
+            git log --all --oneline -n 10
+            exit 1
+          fi
         fi
+        git checkout $FULL_HASH
+        echo "✅ 已成功切换到目标Commit（完整Hash）：$FULL_HASH"
         
         echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
         VERSION_INFO=$(git show -s --date=short --format="作者: %an<br/>时间: %cd<br/>内容: %s<br/>hash: %H")
         echo "VERSION_INFO=$VERSION_INFO" >> $GITHUB_ENV
-        echo "HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
+        echo "HASH=$FULL_HASH" >> $GITHUB_ENV
         # ========== 内核版本锁定（适配f9fbaa7017 commit） ==========
         echo "🔍 检测内核配置文件..."
-        # 兼容文件/目录两种场景，锁定6.6.89内核
         KERNEL_FILE=$(find target/linux/generic/ -type f -name "kernel-6.6*" | head -1)
         KERNEL_DIR=$(find target/linux/generic/ -type d -name "kernel-6.6*" | head -1)
-        
+    
         if [ -n "$KERNEL_DIR" ]; then
-                KERNEL_MAKEFILE="$KERNEL_DIR/Makefile"
-                sed -i "s/PKG_VERSION:=.*/PKG_VERSION:=6.6.89/" "$KERNEL_MAKEFILE"
-                sed -i "s/PKG_HASH:=.*/PKG_HASH:=skip/" "$KERNEL_MAKEFILE"
-                VERSION_KERNEL="6.6.89"
+            KERNEL_MAKEFILE="$KERNEL_DIR/Makefile"
+            sed -i "s/PKG_VERSION:=.*/PKG_VERSION:=6.6.89/" "$KERNEL_MAKEFILE"
+            sed -i "s/PKG_HASH:=.*/PKG_HASH:=skip/" "$KERNEL_MAKEFILE"
+            VERSION_KERNEL="6.6.89"
         elif [ -n "$KERNEL_FILE" ]; then
-                sed -i "s/^.*/6.6.89/" "$KERNEL_FILE"
-                VERSION_KERNEL="6.6.89"
+            sed -i "s/^.*/6.6.89/" "$KERNEL_FILE"
+            VERSION_KERNEL="6.6.89"
         else
-                echo "6.6.89" > target/linux/generic/kernel-6.6
-                VERSION_KERNEL="6.6.89"
+            echo "6.6.89" > target/linux/generic/kernel-6.6
+            VERSION_KERNEL="6.6.89"
         fi
-        
+    
         echo "✅ 已强制锁定内核版本为：$VERSION_KERNEL"
         echo "VERSION_KERNEL=$VERSION_KERNEL" >> $GITHUB_ENV
         
