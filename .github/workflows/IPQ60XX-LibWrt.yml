@@ -157,7 +157,7 @@ jobs:
         CONFIG_TARGET_OPTIONS=y
         # 最新系统版本参数armv8-a+crypto+crc不适合openwrt-23.05
         # CONFIG_TARGET_OPTIMIZATION="-O3 -pipe -march=armv8-a+crypto+crc -mcpu=cortex-a53+crypto+crc -mtune=cortex-a53"
-        CONFIG_TARGET_OPTIMIZATION="-O3 -pipe -march=armv8-a -mcpu=cortex-a53 -mtune=cortex-a53"
+        CONFIG_TARGET_OPTIMIZATION="-O3 -pipe
         CONFIG_CCACHE=y
         CONFIG_PACKAGE_default-settings=y
         CONFIG_PACKAGE_default-settings-chn=y
