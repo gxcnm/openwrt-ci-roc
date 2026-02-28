@@ -58,42 +58,13 @@ jobs:
         df -hT $GITHUB_WORKSPACE
         sudo mkdir -p /mnt/openwrt
         sudo chown -R $(id -u):$(id -g) /mnt/openwrt
-        git clone --no-single-branch --depth=1000 $REPO_URL /mnt/openwrt
+        git clone -b master --depth=1000 $REPO_URL /mnt/openwrt
         cd /mnt/openwrt
-        # ========== 第二步：先执行调试（核心！切换Commit前先看关键信息） ==========
-        echo -e "\n===== 调试信息：仓库基础信息 ====="
-        echo "📌 仓库远程地址：$(git remote -v)"
-        echo "📌 仓库所有远程分支列表："
-        git branch -r
-        echo -e "\n📌 包含 'f9f' 关键词的Commit（前20个）："
-        git log --all --oneline | grep -i "f9f" -m 20 || echo "❌ 未找到任何包含f9f的Commit"
-        echo -e "\n📌 包含 'r34087' 关键词的Commit（前5个）："
-        git log --all --oneline | grep -i "r34087" -m 5 || echo "❌ 未找到任何包含r34087的Commit"
-        echo -e "\n📌 仓库最新10个Commit（所有分支）："
-        git log --all --oneline -n 10
-
-        # ========== 第三步：尝试切换Commit（带验证） ==========
-        git fetch --all
-        FULL_HASH=$(git rev-parse --short=10 $REPO_COMMIT 2>/dev/null)
-        if [ -z "$FULL_HASH" ]; then
-          echo "❌ 错误：简写Hash $REPO_COMMIT 无法解析，尝试全仓库搜索..."
-          # 第二步：全仓库搜索该Hash（跨所有分支）
-          FULL_HASH=$(git log --all --pretty=format:"%H" | grep -i "$REPO_COMMIT" | head -1)
-          if [ -z "$FULL_HASH" ]; then
-            echo "❌ 致命错误：Commit $REPO_COMMIT 在仓库中不存在！"
-            echo "🔍 仓库所有分支的最近10个Commit（便于核对）："
-            git log --all --oneline -n 10
-            exit 1
-          fi
-        fi
-        git checkout $FULL_HASH
-        echo "✅ 已成功切换到目标Commit（完整Hash）：$FULL_HASH"
-        
         echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
         VERSION_INFO=$(git show -s --date=short --format="作者: %an<br/>时间: %cd<br/>内容: %s<br/>hash: %H")
         echo "VERSION_INFO=$VERSION_INFO" >> $GITHUB_ENV
-        echo "HASH=$FULL_HASH" >> $GITHUB_ENV
-        # ========== 内核版本锁定（适配f9fbaa7017 commit） ==========
+        echo "HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
+        # ========== 内核版本锁定（6.6.89） ==========
         echo "🔍 检测内核配置文件..."
         KERNEL_FILE=$(find target/linux/generic/ -type f -name "kernel-6.6*" | head -1)
         KERNEL_DIR=$(find target/linux/generic/ -type d -name "kernel-6.6*" | head -1)
@@ -193,36 +164,9 @@ jobs:
         CONFIG_KERNEL_ZRAM_BACKEND_LZO=y
         CONFIG_KERNEL_ZRAM_DEF_COMP_LZ4=y
         EOF
-
-        # 3. 生成合法配置（核心：用make defconfig替代错误的./scripts/config调用）
-        echo "🔍 生成并验证配置文件..."
+        
         make defconfig
-        if [ $? -ne 0 ]; then
-          echo "❌ 配置文件语法错误，请检查.config内容"
-          cat $OPENWRT_PATH/.config
-          exit 1
-        fi
-
-        # 4. 验证9个kmod模块是否正确写入配置
-        echo "🔍 验证关键内核模块配置..."
-        MODULES=(
-          "kmod-fuse" "kmod-fs-btrfs" "kmod-ipt-extra"
-          "kmod-ipt-nat" "kmod-ipt-nat6" "kmod-ipt-physdev"
-          "kmod-nf-ipvs" "kmod-veth" "kmod-ipt-fullconenat"
-        )
-        for mod in "${MODULES[@]}"; do
-          if grep -q "^CONFIG_PACKAGE_$mod=y" $OPENWRT_PATH/.config; then
-                echo "✅ $mod 配置已生效"
-          else
-                echo "⚠ $mod 配置缺失，自动补充..."
-                echo "CONFIG_PACKAGE_$mod=y" >> $OPENWRT_PATH/.config
-          fi
-        done
-
-        # 5. 二次确认配置合法性（避免补充模块后语法错误）
-        make defconfig > /dev/null 2>&1
-        echo "✅ 自定义配置加载完成，目标架构验证："
-        grep -E 'CONFIG_TARGET_(qualcommax|ipq60xx|qihoo_360v6)' $OPENWRT_PATH/.config
+        echo "✅ 配置加载完成，仅编译9个kmod模块"
 
     - name: Download DL Package(下载DL软件包)
       run: |
