@@ -3,11 +3,12 @@ name: IPQ60XX-LibWrt
 on:
   workflow_dispatch:
   workflow_call:
+  # schedule:
+  #   - cron: 0 20 * * *
 
 env:
-  REPO_URL: https://github.com/immortalwrt/immortalwrt
-  REPO_BRANCH: openwrt-23.05
-  REPO_COMMIT: ''
+  REPO_URL: https://github.com/laipeng668/openwrt-6.x.git
+  REPO_BRANCH: main-nss
   CONFIG_FILE: configs/IPQ60XX.config
   GENERAL_CONFIG_FILE: configs/General.config
   DIY_SCRIPT: scripts/Roc-script.sh
@@ -15,12 +16,7 @@ env:
   UPLOAD_BIN_DIR: false
   FIRMWARE_RELEASE: true
   FIRMWARE_TAG: IPQ60XX
-  KERNEL_VERSION: 6.6.89
   TZ: Asia/Shanghai
-  # 提前固化核心环境变量，避免后续读取错误
-  SOURCE_REPO: immortalwrt
-  DEVICE_TARGET: qualcommax
-  DEVICE_SUBTARGET: ipq60xx
 
 jobs:
   Build:
@@ -58,59 +54,36 @@ jobs:
         df -hT $GITHUB_WORKSPACE
         sudo mkdir -p /mnt/openwrt
         sudo chown -R $(id -u):$(id -g) /mnt/openwrt
-        git clone -b $REPO_BRANCH --single-branch $REPO_URL /mnt/openwrt
+        git clone --depth 1 -b $REPO_BRANCH --single-branch $REPO_URL /mnt/openwrt
         cd /mnt/openwrt
         echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
         VERSION_INFO=$(git show -s --date=short --format="作者: %an<br/>时间: %cd<br/>内容: %s<br/>hash: %H")
         echo "VERSION_INFO=$VERSION_INFO" >> $GITHUB_ENV
-        # 仅获取HASH，其他变量已在env中固化
-        echo "HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
-        
-        # ========== 修复：适配文件/目录两种情况，锁定6.6.89内核 ==========
-        echo "🔍 检测内核配置文件..."
-        # 第一步：兼容文件（kernel-6.6）和目录（kernel-6.6）两种情况
-        KERNEL_FILE=$(find target/linux/generic/ -type f -name "kernel-6.6*" | head -1)
-        KERNEL_DIR=$(find target/linux/generic/ -type d -name "kernel-6.6*" | head -1)
-        
-        # 第二步：优先用目录，无目录则用文件，锁定6.6.89内核
-        if [ -n "$KERNEL_DIR" ]; then
-            # 目录场景：修改Makefile锁定版本
-            KERNEL_MAKEFILE="$KERNEL_DIR/Makefile"
-            sed -i "s/PKG_VERSION:=.*/PKG_VERSION:=6.6.89/" "$KERNEL_MAKEFILE"
-            sed -i "s/PKG_HASH:=.*/PKG_HASH:=skip/" "$KERNEL_MAKEFILE"
-            VERSION_KERNEL="6.6.89"
-        elif [ -n "$KERNEL_FILE" ]; then
-            # 文件场景：直接修改内核版本文件
-            sed -i "s/^.*/6.6.89/" "$KERNEL_FILE"
-            VERSION_KERNEL="6.6.89"
-        else
-            # 无6.6相关文件/目录：手动创建kernel-6.6文件并指定版本
-            echo "6.6.89" > target/linux/generic/kernel-6.6
-            VERSION_KERNEL="6.6.89"
-        fi
-        
-        echo "✅ 已强制锁定内核版本为：$VERSION_KERNEL"
+        VERSION_KERNEL=$(grep -oP 'LINUX_KERNEL_HASH-\K[0-9]+\.[0-9]+\.[0-9]+' target/linux/generic/kernel-6.12)
         echo "VERSION_KERNEL=$VERSION_KERNEL" >> $GITHUB_ENV
-        
+
     - name: Generate Variables(生成变量)
       run: |
+        cp $CONFIG_FILE $OPENWRT_PATH/.config
         cd $OPENWRT_PATH
-        # 直接手动定义目标架构变量，避免读取错误配置
-        echo "SOURCE_REPO=immortalwrt" >> $GITHUB_ENV
-        echo "DEVICE_TARGET=qualcommax" >> $GITHUB_ENV
-        echo "DEVICE_SUBTARGET=ipq60xx" >> $GITHUB_ENV
+        make defconfig > /dev/null 2>&1
+        SOURCE_REPO="$(echo $REPO_URL | awk -F '/' '{print $(NF)}')"
+        echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_ENV
+        DEVICE_TARGET=$(cat .config | grep CONFIG_TARGET_BOARD | awk -F '"' '{print $2}')
+        echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_ENV
+        DEVICE_SUBTARGET=$(cat .config | grep CONFIG_TARGET_SUBTARGET | awk -F '"' '{print $2}')
+        echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_ENV
         echo "HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
         echo "CACHE_DATE=$(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_ENV
 
     - name: Cache Toolchain(缓存工具链)
       uses: actions/cache@main
       with:
-        # 简化Key：仅保留固定标识+HASH，去掉易变的时间戳，确保后续能命中
-        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ env.HASH }}
+        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ env.HASH }} ${{ env.CACHE_DATE }}
         restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-
         path: |
           ${{ env.OPENWRT_PATH }}/.ccache
-          ${{ env.OPENWRT_PATH }}/staging_dir/toolchain-*
+          ${{ env.OPENWRT_PATH }}/staging_dir
 
     - name: Refresh The Cache(刷新缓存)
       run: |
@@ -119,7 +92,7 @@ jobs:
               find "$dir" -type f -exec touch {} +
           done
         fi
-        
+
     - name: Install Feeds(安装feeds)
       run: |
         cd $OPENWRT_PATH
@@ -128,78 +101,16 @@ jobs:
   
     - name: Load Custom Configuration(加载自定义配置)
       run: |
+        chmod +x $DIY_SCRIPT
         cd $OPENWRT_PATH
-        # 直接写入完整配置（避免合并冲突）
-        cat > $OPENWRT_PATH/.config << EOF
-        # 核心机型配置
-        CONFIG_TARGET_qualcommax=y
-        CONFIG_TARGET_qualcommax_ipq60xx=y
-        CONFIG_TARGET_MULTI_PROFILE=y
-        CONFIG_TARGET_DEVICE_qualcommax_ipq60xx_DEVICE_qihoo_360v6=y
-        CONFIG_ATH11K_MEM_PROFILE_512M=y
-        CONFIG_NSS_FIRMWARE_VERSION_11_4=y
-
-        # 缺失的9个内核模块（核心添加）
-        CONFIG_PACKAGE_kmod-fuse=y
-        CONFIG_PACKAGE_kmod-fs-btrfs=y
-        CONFIG_PACKAGE_kmod-ipt-extra=y
-        CONFIG_PACKAGE_kmod-ipt-nat=y
-        CONFIG_PACKAGE_kmod-ipt-nat6=y
-        CONFIG_PACKAGE_kmod-ipt-physdev=y
-        CONFIG_PACKAGE_kmod-nf-ipvs=y
-        CONFIG_PACKAGE_kmod-veth=y
-        CONFIG_PACKAGE_kmod-ipt-fullconenat=y
-
-        # 通用编译配置
-        CONFIG_DEVEL=y
-        CONFIG_TARGET_OPTIONS=y
-        # 最新系统版本参数armv8-a+crypto+crc不适合openwrt-23.05
-        # CONFIG_TARGET_OPTIMIZATION="-O3 -pipe -march=armv8-a+crypto+crc -mcpu=cortex-a53+crypto+crc -mtune=cortex-a53"
-        CONFIG_TARGET_OPTIMIZATION="-O3 -pipe"
-        CONFIG_CCACHE=y
-        CONFIG_PACKAGE_default-settings=y
-        CONFIG_PACKAGE_default-settings-chn=y
-        CONFIG_TARGET_PER_DEVICE_ROOTFS=y
-        CONFIG_LUCI_LANG_zh_Hant=y
-        CONFIG_TARGET_ROOTFS_INITRAMFS=n
-
-        # ZRAM优化
-        CONFIG_PACKAGE_zram-swap=y
-        CONFIG_PACKAGE_kmod-lib-lz4=y
-        CONFIG_KERNEL_ZRAM_BACKEND_LZ4=y
-        CONFIG_KERNEL_ZRAM_BACKEND_LZO=y
-        CONFIG_KERNEL_ZRAM_DEF_COMP_LZ4=y
-        EOF
-
-        # 进入源码目录，生成默认配置（验证语法）
-        cd $OPENWRT_PATH
-        make defconfig
-        echo "✅ 配置生成完成，当前目标架构："
-        grep -E 'CONFIG_TARGET_(qualcommax|ipq60xx)' .config
+        $GITHUB_WORKSPACE/$DIY_SCRIPT
 
     - name: Download DL Package(下载DL软件包)
       run: |
-        # 下载依赖包（并行下载）
+        cat $CONFIG_FILE $GENERAL_CONFIG_FILE > $OPENWRT_PATH/.config
         cd $OPENWRT_PATH
+        make defconfig
         make download -j$(nproc)
-        # 清理下载缓存中的冗余文件
-        find dl -type f -name "*.hash" -delete
-
-    # ========== 新增：缓存下载的依赖包（DL目录） ==========
-    - name: Cache DL Packages(缓存下载的依赖包)
-      uses: actions/cache@main
-      with:
-        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-dl-${{ env.DEVICE_TARGET }}-${{ env.HASH }}
-        restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-dl-${{ env.DEVICE_TARGET }}-
-        path: ${{ env.OPENWRT_PATH }}/dl
-
-    # ========== 新增：缓存已编译的软件包 ==========
-    - name: Cache Compiled Packages(缓存已编译的软件包)
-      uses: actions/cache@main
-      with:
-        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-packages-${{ env.DEVICE_TARGET }}-${{ env.HASH }}
-        restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-packages-${{ env.DEVICE_TARGET }}-
-        path: ${{ env.OPENWRT_PATH }}/staging_dir/packages
 
     - name: Compile Firmware(开始编译固件)
       id: compile
@@ -207,68 +118,70 @@ jobs:
         cd $OPENWRT_PATH
         echo -e "$(nproc) thread compile"
         make -j$(nproc) || make -j1 || make -j1 V=s
-        # 强制标记编译成功（避免因警告导致状态丢失）
         echo "status=success" >> $GITHUB_OUTPUT
         echo "DATE=$(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_ENV
         echo "FILE_DATE=$(date +"%Y.%m.%d")" >> $GITHUB_ENV
-      # 即使有警告，也标记为成功（内核模块编译警告不影响产物）
-      continue-on-error: false
 
     - name: Check Space Usage(检查空间使用情况)
       if: (!cancelled())
       run: df -hT
 
+    - name: Upload Bin Directory(上传固件)
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
+      uses: actions/upload-artifact@main
+      with:
+        name: ${{ env.SOURCE_REPO }}-bin-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ env.FILE_DATE }}
+        path: ${{ env.OPENWRT_PATH }}/bin
+
     - name: Organize Files(整理文件)
       if: steps.compile.outputs.status == 'success'
       run: |
-        # 精准定位固件路径（适配 openwrt-6.x.git 源码结构）
-        FIRMWARE_PATH=$(find $OPENWRT_PATH/bin/targets -type d -name "ipq60xx")
-        echo "FIRMWARE_PATH=$FIRMWARE_PATH" >> $GITHUB_ENV
-        # 复制配置文件和清单
-        cp $OPENWRT_PATH/.config $FIRMWARE_PATH/IPQ60XX.config
-        mv $FIRMWARE_PATH/config.buildinfo $FIRMWARE_PATH/IPQ60XX.config.buildinfo
-        mv $FIRMWARE_PATH/*.manifest $FIRMWARE_PATH/IPQ60XX.manifest
-        # 打包 APK 包（你需要的 kmod 模块）
-        mkdir -p $FIRMWARE_PATH/packages
-        cp $OPENWRT_PATH/bin/packages/aarch64_cortex-a53/base/*.apk $FIRMWARE_PATH/packages/
-        tar -zcf $FIRMWARE_PATH/IPQ60XX.Packages.tar.gz $FIRMWARE_PATH/packages
-        # 清理冗余文件
-        rm -rf $FIRMWARE_PATH/packages $FIRMWARE_PATH/feeds.buildinfo $FIRMWARE_PATH/version.buildinfo $FIRMWARE_PATH/sha256sums $FIRMWARE_PATH/profiles.json
-        echo "✅ 产物整理完成，路径：$FIRMWARE_PATH"
+        cd $OPENWRT_PATH/bin/targets/*/*
+        cp $OPENWRT_PATH/.config IPQ60XX.config
+        mv config.buildinfo IPQ60XX.config.buildinfo
+        mv libwrt-qualcommax-ipq60xx.manifest IPQ60XX.manifest
+        mv -f $OPENWRT_PATH/bin/packages/*/*/*.apk packages
+        tar -zcf IPQ60XX.Packages.tar.gz packages
+        rm -rf packages feeds.buildinfo version.buildinfo sha256sums profiles.json
+        echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
 
-    # ========== 新增：上传Artifacts步骤（核心） ==========
-    - name: Upload Firmware to Artifacts(上传产物到Artifacts)
-      if: steps.compile.outputs.status == 'success'
-      uses: actions/upload-artifact@v4
+    - name: Upload Firmware To Artifact(将固件上传到Artifact)
+      if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE != 'true'
+      uses: actions/upload-artifact@main
       with:
-        name: 360V6-Firmware-${{ env.FILE_DATE }}
-        path: |
-          ${{ env.FIRMWARE_PATH }}/*
-          $OPENWRT_PATH/bin/packages/aarch64_cortex-a53/base/*.apk
-        retention-days: 90
+        name: ${{ env.SOURCE_REPO }}-firmware-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ env.FILE_DATE }}
+        path: ${{ env.FIRMWARE_PATH }}
 
     - name: Upload Firmware To Release(发布固件)
-      if: steps.compile.outputs.status == 'success'
+      if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE == 'true'
       uses: ncipollo/release-action@main
       with:
-        name: ${{ env.DATE }} - 360V6 固件_${{ env.FILE_DATE }}_6.6.89内核（不可用，仅含 kmod 缺失模块）
+        name: ${{ env.DATE }} for ${{ env.FIRMWARE_TAG }}
         allowUpdates: true
-        tag: 360V6-Firmware-${{ env.FILE_DATE }}
+        tag: ${{ env.FIRMWARE_TAG }}
         token: ${{ secrets.GITHUB_TOKEN }}
         artifacts: ${{ env.FIRMWARE_PATH }}/*
         body: |
-          ### 固件信息
-          - 适配设备：360V6（qihoo_360v6）
-          - 内核版本：${{ env.VERSION_KERNEL }}
-          - 包含模块：kmod-fuse、kmod-fs-btrfs 等9个缺失内核模块
-          - 默认地址：192.168.99.1（无密码）
+          **This is OpenWrt Firmware for ${{ env.FIRMWARE_TAG }}**
+          ### 📒 固件信息
+          - 这是开启全功能NSS的6.12内核固件，默认主题为Aurora；该固件在ImmortalWrt的基础上，添加了额外的软件包cpufreq、ddns、ttyd、upnp、wolplus、samba4、vlmcsd、aria2、autoreboot、uhttpd、wifischedule、frps、frpc、diskman、hd-idle、banip、acme、arpbind、usb-printer、passwall、oaf、sqm、wireguard、watchcat、wechatpush、3cat、smartdns，并添加了若干工具，具体详见IPQ60XX.config和General.config。
+          - 💻 这是 ${{ env.FIRMWARE_TAG }} 平台使用的 OpenWrt 固件
+          - ⚽ 固件源码: ${{ env.REPO_URL }}
+          - 💝 源码分支: ${{ env.REPO_BRANCH }}
+          - 🌐 默认地址: **192.168.2.1**
+          - 🔑 默认密码: none
+          ### 🧊 固件版本
+          - 固件内核版本：**${{ env.VERSION_KERNEL }}**
+          - 固件编译前最后一次➦[主源码](${{ env.REPO_URL }})更新记录
+          - ${{ env.VERSION_INFO }}
 
     - name: Delete Old Cache(删除旧缓存)
       run: |
-        # 仅清理x86架构的无效缓存，保留qualcommax的缓存
-        gh cache list --key ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-x86- | cut -f1 | xargs -I {} gh cache delete {}
-        echo "✅ 已清理x86架构的无效缓存，保留qualcommax缓存"
+        # 获取缓存列表并删除
+        gh cache list --key ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}- --json key --jq '.[] | .key' | while read -r key; do
+          gh cache delete "$key"
         done
+        # 输出缓存状态
         echo "========cache status========"
         echo "ccache: $(du -sh $OPENWRT_PATH/.ccache | cut -f 1)"
         echo "staging: $(du -sh $OPENWRT_PATH/staging_dir | cut -f 1)"
