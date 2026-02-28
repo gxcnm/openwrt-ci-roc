@@ -116,21 +116,6 @@ jobs:
               find "$dir" -type f -exec touch {} +
           done
         fi
-    # ========== 新增：缓存下载的依赖包（DL目录） ==========
-    - name: Cache DL Packages(缓存下载的依赖包)
-      uses: actions/cache@main
-      with:
-        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-dl-${{ env.HASH }}-${{ env.CACHE_DATE }}
-        restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-dl-
-        path: ${{ env.OPENWRT_PATH }}/dl
-
-    # ========== 新增：缓存已编译的软件包 ==========
-    - name: Cache Compiled Packages(缓存已编译的软件包)
-      uses: actions/cache@main
-      with:
-        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-packages-${{ env.HASH }}-${{ env.CACHE_DATE }}
-        restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-packages-
-        path: ${{ env.OPENWRT_PATH }}/staging_dir/packages
         
     - name: Install Feeds(安装feeds)
       run: |
@@ -170,7 +155,9 @@ jobs:
         # 通用编译配置
         CONFIG_DEVEL=y
         CONFIG_TARGET_OPTIONS=y
-        CONFIG_TARGET_OPTIMIZATION="-O3 -pipe -march=armv8-a+crypto+crc -mcpu=cortex-a53+crypto+crc -mtune=cortex-a53"
+        # 最新系统版本参数armv8-a+crypto+crc不适合openwrt-23.05
+        # CONFIG_TARGET_OPTIMIZATION="-O3 -pipe -march=armv8-a+crypto+crc -mcpu=cortex-a53+crypto+crc -mtune=cortex-a53"
+        CONFIG_TARGET_OPTIMIZATION="-O3 -pipe -march=armv8-a -mcpu=cortex-a53 -mtune=cortex-a53"
         CONFIG_CCACHE=y
         CONFIG_PACKAGE_default-settings=y
         CONFIG_PACKAGE_default-settings-chn=y
@@ -191,6 +178,22 @@ jobs:
         make defconfig
         # 下载依赖包（并行下载）
         make download -j$(nproc)
+
+    # ========== 新增：缓存下载的依赖包（DL目录） ==========
+    - name: Cache DL Packages(缓存下载的依赖包)
+      uses: actions/cache@main
+      with:
+        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-dl-${{ env.HASH }}-${{ env.CACHE_DATE }}
+        restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-dl-
+        path: ${{ env.OPENWRT_PATH }}/dl
+
+    # ========== 新增：缓存已编译的软件包 ==========
+    - name: Cache Compiled Packages(缓存已编译的软件包)
+      uses: actions/cache@main
+      with:
+        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-packages-${{ env.HASH }}-${{ env.CACHE_DATE }}
+        restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-packages-
+        path: ${{ env.OPENWRT_PATH }}/staging_dir/packages
 
     - name: Compile Firmware(开始编译固件)
       id: compile
