@@ -6,8 +6,8 @@ on:
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
-  REPO_BRANCH: master
-  REPO_COMMIT: f9fbaa7017
+  REPO_BRANCH: openwrt-23.05
+  REPO_COMMIT: ''
   CONFIG_FILE: configs/IPQ60XX.config
   GENERAL_CONFIG_FILE: configs/General.config
   DIY_SCRIPT: scripts/Roc-script.sh
@@ -60,44 +60,31 @@ jobs:
         VERSION_INFO=$(git show -s --date=short --format="作者: %an<br/>时间: %cd<br/>内容: %s<br/>hash: %H")
         echo "VERSION_INFO=$VERSION_INFO" >> $GITHUB_ENV
         
-        # ========== 核心修复：自动检测内核配置文件路径 ==========
-        echo "🔍 开始检测内核配置文件路径..."
-        # 第一步：列出所有可能的内核版本目录，确认实际存在的路径
-        ls -la target/linux/generic/ | grep "kernel-"
-        # 第二步：自动匹配包含6.6的内核目录
+        # ========== 修复：适配文件/目录两种情况，锁定6.6.89内核 ==========
+        echo "🔍 检测内核配置文件..."
+        # 第一步：兼容文件（kernel-6.6）和目录（kernel-6.6）两种情况
+        KERNEL_FILE=$(find target/linux/generic/ -type f -name "kernel-6.6*" | head -1)
         KERNEL_DIR=$(find target/linux/generic/ -type d -name "kernel-6.6*" | head -1)
-        if [ -z "$KERNEL_DIR" ]; then
-            # 如果没找到6.6目录，匹配所有kernel-*目录，取第一个
-            KERNEL_DIR=$(find target/linux/generic/ -type d -name "kernel-*" | head -1)
-            echo "⚠ 未找到6.6内核目录，使用第一个内核目录：$KERNEL_DIR"
+        
+        # 第二步：优先用目录，无目录则用文件，锁定6.6.89内核
+        if [ -n "$KERNEL_DIR" ]; then
+            # 目录场景：修改Makefile锁定版本
+            KERNEL_MAKEFILE="$KERNEL_DIR/Makefile"
+            sed -i "s/PKG_VERSION:=.*/PKG_VERSION:=6.6.89/" "$KERNEL_MAKEFILE"
+            sed -i "s/PKG_HASH:=.*/PKG_HASH:=skip/" "$KERNEL_MAKEFILE"
+            VERSION_KERNEL="6.6.89"
+        elif [ -n "$KERNEL_FILE" ]; then
+            # 文件场景：直接修改内核版本文件
+            sed -i "s/^.*/6.6.89/" "$KERNEL_FILE"
+            VERSION_KERNEL="6.6.89"
         else
-            echo "✅ 找到6.6内核目录：$KERNEL_DIR"
+            # 无6.6相关文件/目录：手动创建kernel-6.6文件并指定版本
+            echo "6.6.89" > target/linux/generic/kernel-6.6
+            VERSION_KERNEL="6.6.89"
         fi
-        # 第三步：拼接完整的Makefile路径
-        KERNEL_MAKEFILE="$KERNEL_DIR/Makefile"
-        echo "内核配置文件路径：$KERNEL_MAKEFILE"
-
-        # 第四步：校验文件是否存在，不存在则跳过版本校验（避免编译中断）
-        if [ -f "$KERNEL_MAKEFILE" ]; then
-            # 适配不同的版本定义关键字（LINUX_KERNEL_HASH / PKG_VERSION）
-            VERSION_KERNEL=$(grep -oP 'LINUX_KERNEL_HASH-\K[0-9]+\.[0-9]+\.[0-9]+|PKG_VERSION:=\K[0-9]+\.[0-9]+\.[0-9]+' "$KERNEL_MAKEFILE" | head -1)
-            if [ -z "$VERSION_KERNEL" ]; then
-                echo "⚠ 无法提取内核版本，跳过版本校验"
-            else
-                echo "🔍 提取到内核版本：$VERSION_KERNEL"
-                if [ "$VERSION_KERNEL" != "$KERNEL_VERSION" ]; then
-                    echo "⚠ 源码内核版本($VERSION_KERNEL)与目标($KERNEL_VERSION)不匹配，但继续编译..."
-                    # 注释掉exit 1，避免编译中断，仅警告
-                    # exit 1
-                else
-                    echo "✅ 源码内核版本校验通过：$VERSION_KERNEL"
-                fi
-                echo "VERSION_KERNEL=$VERSION_KERNEL" >> $GITHUB_ENV
-            fi
-        else
-            echo "⚠ 内核配置文件不存在($KERNEL_MAKEFILE)，跳过版本校验"
-            echo "VERSION_KERNEL=unknown" >> $GITHUB_ENV
-        fi
+        
+        echo "✅ 已强制锁定内核版本为：$VERSION_KERNEL"
+        echo "VERSION_KERNEL=$VERSION_KERNEL" >> $GITHUB_ENV
         
     - name: Generate Variables(生成变量)
       run: |
