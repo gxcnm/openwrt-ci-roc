@@ -17,6 +17,10 @@ env:
   FIRMWARE_TAG: IPQ60XX
   KERNEL_VERSION: 6.6.89
   TZ: Asia/Shanghai
+  # 提前固化核心环境变量，避免后续读取错误
+  SOURCE_REPO: immortalwrt
+  DEVICE_TARGET: qualcommax
+  DEVICE_SUBTARGET: ipq60xx
 
 jobs:
   Build:
@@ -59,6 +63,8 @@ jobs:
         echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
         VERSION_INFO=$(git show -s --date=short --format="作者: %an<br/>时间: %cd<br/>内容: %s<br/>hash: %H")
         echo "VERSION_INFO=$VERSION_INFO" >> $GITHUB_ENV
+        # 仅获取HASH，其他变量已在env中固化
+        echo "HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
         
         # ========== 修复：适配文件/目录两种情况，锁定6.6.89内核 ==========
         echo "🔍 检测内核配置文件..."
@@ -99,11 +105,12 @@ jobs:
     - name: Cache Toolchain(缓存工具链)
       uses: actions/cache@main
       with:
-        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ env.HASH }} ${{ env.CACHE_DATE }}
+        # 简化Key：仅保留固定标识+HASH，去掉易变的时间戳，确保后续能命中
+        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ env.HASH }}
         restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-
         path: |
           ${{ env.OPENWRT_PATH }}/.ccache
-          ${{ env.OPENWRT_PATH }}/staging_dir
+          ${{ env.OPENWRT_PATH }}/staging_dir/toolchain-*
 
     - name: Refresh The Cache(刷新缓存)
       run: |
@@ -182,16 +189,16 @@ jobs:
     - name: Cache DL Packages(缓存下载的依赖包)
       uses: actions/cache@main
       with:
-        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-dl-${{ env.HASH }}-${{ env.CACHE_DATE }}
-        restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-dl-
+        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-dl-${{ env.DEVICE_TARGET }}-${{ env.HASH }}
+        restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-dl-${{ env.DEVICE_TARGET }}-
         path: ${{ env.OPENWRT_PATH }}/dl
 
     # ========== 新增：缓存已编译的软件包 ==========
     - name: Cache Compiled Packages(缓存已编译的软件包)
       uses: actions/cache@main
       with:
-        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-packages-${{ env.HASH }}-${{ env.CACHE_DATE }}
-        restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-packages-
+        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-packages-${{ env.DEVICE_TARGET }}-${{ env.HASH }}
+        restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-packages-${{ env.DEVICE_TARGET }}-
         path: ${{ env.OPENWRT_PATH }}/staging_dir/packages
 
     - name: Compile Firmware(开始编译固件)
@@ -238,7 +245,7 @@ jobs:
         path: |
           ${{ env.FIRMWARE_PATH }}/*
           $OPENWRT_PATH/bin/packages/aarch64_cortex-a53/base/*.apk
-        retention-days: 90  # 产物保留90天，足够你下载
+        retention-days: 90
 
     - name: Upload Firmware To Release(发布固件)
       if: steps.compile.outputs.status == 'success'
@@ -258,8 +265,9 @@ jobs:
 
     - name: Delete Old Cache(删除旧缓存)
       run: |
-        gh cache list --key ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}- --json key --jq '.[] | .key' | while read -r key; do
-          gh cache delete "$key"
+        # 仅清理x86架构的无效缓存，保留qualcommax的缓存
+        gh cache list --key ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-x86- | cut -f1 | xargs -I {} gh cache delete {}
+        echo "✅ 已清理x86架构的无效缓存，保留qualcommax缓存"
         done
         echo "========cache status========"
         echo "ccache: $(du -sh $OPENWRT_PATH/.ccache | cut -f 1)"
