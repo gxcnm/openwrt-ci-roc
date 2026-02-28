@@ -88,15 +88,11 @@ jobs:
         
     - name: Generate Variables(生成变量)
       run: |
-        cp $CONFIG_FILE $OPENWRT_PATH/.config
         cd $OPENWRT_PATH
-        make defconfig > /dev/null 2>&1
-        SOURCE_REPO="$(echo $REPO_URL | awk -F '/' '{print $(NF)}')"
-        echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_ENV
-        DEVICE_TARGET=$(cat .config | grep CONFIG_TARGET_BOARD | awk -F '"' '{print $2}')
-        echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_ENV
-        DEVICE_SUBTARGET=$(cat .config | grep CONFIG_TARGET_SUBTARGET | awk -F '"' '{print $2}')
-        echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_ENV
+        # 直接手动定义目标架构变量，避免读取错误配置
+        echo "SOURCE_REPO=immortalwrt" >> $GITHUB_ENV
+        echo "DEVICE_TARGET=qualcommax" >> $GITHUB_ENV
+        echo "DEVICE_SUBTARGET=ipq60xx" >> $GITHUB_ENV
         echo "HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
         echo "CACHE_DATE=$(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_ENV
 
@@ -125,12 +121,7 @@ jobs:
   
     - name: Load Custom Configuration(加载自定义配置)
       run: |
-        chmod +x $DIY_SCRIPT
         cd $OPENWRT_PATH
-        $GITHUB_WORKSPACE/$DIY_SCRIPT
-
-    - name: Download DL Package(下载DL软件包)
-      run: |
         # 直接写入完整配置（避免合并冲突）
         cat > $OPENWRT_PATH/.config << EOF
         # 核心机型配置
@@ -157,7 +148,7 @@ jobs:
         CONFIG_TARGET_OPTIONS=y
         # 最新系统版本参数armv8-a+crypto+crc不适合openwrt-23.05
         # CONFIG_TARGET_OPTIMIZATION="-O3 -pipe -march=armv8-a+crypto+crc -mcpu=cortex-a53+crypto+crc -mtune=cortex-a53"
-        CONFIG_TARGET_OPTIMIZATION="-O3 -pipe
+        CONFIG_TARGET_OPTIMIZATION="-O3 -pipe"
         CONFIG_CCACHE=y
         CONFIG_PACKAGE_default-settings=y
         CONFIG_PACKAGE_default-settings-chn=y
@@ -176,8 +167,16 @@ jobs:
         # 进入源码目录，生成默认配置（验证语法）
         cd $OPENWRT_PATH
         make defconfig
+        echo "✅ 配置生成完成，当前目标架构："
+        grep -E 'CONFIG_TARGET_(qualcommax|ipq60xx)' .config
+
+    - name: Download DL Package(下载DL软件包)
+      run: |
         # 下载依赖包（并行下载）
+        cd $OPENWRT_PATH
         make download -j$(nproc)
+        # 清理下载缓存中的冗余文件
+        find dl -type f -name "*.hash" -delete
 
     # ========== 新增：缓存下载的依赖包（DL目录） ==========
     - name: Cache DL Packages(缓存下载的依赖包)
@@ -228,6 +227,7 @@ jobs:
         tar -zcf $FIRMWARE_PATH/IPQ60XX.Packages.tar.gz $FIRMWARE_PATH/packages
         # 清理冗余文件
         rm -rf $FIRMWARE_PATH/packages $FIRMWARE_PATH/feeds.buildinfo $FIRMWARE_PATH/version.buildinfo $FIRMWARE_PATH/sha256sums $FIRMWARE_PATH/profiles.json
+        echo "✅ 产物整理完成，路径：$FIRMWARE_PATH"
 
     # ========== 新增：上传Artifacts步骤（核心） ==========
     - name: Upload Firmware to Artifacts(上传产物到Artifacts)
@@ -244,7 +244,7 @@ jobs:
       if: steps.compile.outputs.status == 'success'
       uses: ncipollo/release-action@main
       with:
-        name: ${{ env.DATE }} - 360V6 固件（不可用，仅含 kmod 缺失模块）
+        name: ${{ env.DATE }} - 360V6 固件_${{ env.FILE_DATE }}_6.6.89内核（不可用，仅含 kmod 缺失模块）
         allowUpdates: true
         tag: 360V6-Firmware-${{ env.FILE_DATE }}
         token: ${{ secrets.GITHUB_TOKEN }}
