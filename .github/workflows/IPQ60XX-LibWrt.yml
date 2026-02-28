@@ -6,7 +6,7 @@ on:
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
-  REPO_BRANCH: ''
+  REPO_BRANCH: master
   REPO_COMMIT: f9fbaa7017
   CONFIG_FILE: configs/IPQ60XX.config
   GENERAL_CONFIG_FILE: configs/General.config
@@ -99,7 +99,7 @@ jobs:
       uses: actions/cache@main
       with:
         # 简化Key：仅保留固定标识
-        key: immortalwrt-${{ env.REPO_BRANCH }}-qualcommax-ipq60xx-f9fbaa7017
+        key: immortalwrt-${{ env.REPO_BRANCH }}-qualcommax-ipq60xx-6.6.89
         restore-keys: immortalwrt-${{ env.REPO_BRANCH }}-qualcommax-ipq60xx-
         path: |
           ${{ env.OPENWRT_PATH }}/.ccache
@@ -180,7 +180,7 @@ jobs:
     - name: Cache DL Packages(缓存下载的依赖包)
       uses: actions/cache@main
       with:
-        key: immortalwrt-${{ env.REPO_BRANCH }}-dl-qualcommax-ipq60xx-f9fbaa7017
+        key: immortalwrt-${{ env.REPO_BRANCH }}-dl-qualcommax-ipq60xx-6.6.89
         restore-keys: immortalwrt-${{ env.REPO_BRANCH }}-dl-qualcommax-ipq60xx-
         path: ${{ env.OPENWRT_PATH }}/dl
 
@@ -188,7 +188,7 @@ jobs:
     - name: Cache Compiled Packages(缓存已编译的软件包)
       uses: actions/cache@main
       with:
-        key: immortalwrt-${{ env.REPO_BRANCH }}-packages-qualcommax-ipq60xx-f9fbaa7017
+        key: immortalwrt-${{ env.REPO_BRANCH }}-packages-qualcommax-ipq60xx-6.6.89
         restore-keys: immortalwrt-${{ env.REPO_BRANCH }}-packages-qualcommax-ipq60xx-
         path: ${{ env.OPENWRT_PATH }}/staging_dir/packages
 
