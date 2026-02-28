@@ -58,7 +58,7 @@ jobs:
         df -hT $GITHUB_WORKSPACE
         sudo mkdir -p /mnt/openwrt
         sudo chown -R $(id -u):$(id -g) /mnt/openwrt
-        git clone $REPO_URL /mnt/openwrt
+        git clone -b $REPO_URL /mnt/openwrt
         cd /mnt/openwrt
         git checkout f9fbaa7017
         echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
