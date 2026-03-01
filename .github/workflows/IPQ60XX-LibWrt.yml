@@ -62,6 +62,14 @@ jobs:
         git clone --no-single-branch --depth=1000 $REPO_URL /mnt/openwrt
         cd /mnt/openwrt
         git fetch --all
+        echo "🔍 仓库所有分支列表："
+        git branch -r  # 输出所有远程分支，确认是否有目标分支
+        echo -e "\n🔍 包含 'f9f' 关键词的Commit（前20个）："
+        git log --all --oneline | grep -i "f9f" -m 20 || echo "❌ 未找到包含f9f的Commit"
+        echo -e "\n🔍 固件版本对应的r34087提交："
+        git log --all --oneline | grep -i "r34087" -m 5 || echo "❌ 未找到r34087相关Commit"
+        echo -e "\n🔍 当前HEAD指向的Commit："
+        git rev-parse --short=10 HEAD
         
         # 修复3：验证Commit Hash（支持简写/完整Hash，优先查全仓库）
         COMMIT_HASH="f9fbaa7017"
