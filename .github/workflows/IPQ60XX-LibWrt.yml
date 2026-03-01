@@ -72,14 +72,13 @@ jobs:
         echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
         VERSION_INFO=$(git show -s --date=short --format="作者: %an<br/>时间: %cd<br/>内容: %s<br/>hash: %H")
         echo "VERSION_INFO=$VERSION_INFO" >> $GITHUB_ENV
-        # 定义目标内核版本（你需要的6.6.89）
+        # 定义目标内核版本
         TARGET_KERNEL_MAIN="6.6"
         TARGET_KERNEL_FULL="6.6.89"
 
         禁用6.12内核配置（彻底避免混淆）
         KERNEL_612_FILE="target/linux/generic/kernel-6.12"
         if [ -f "$KERNEL_612_FILE" ]; then
-            # 重命名6.12文件，让编译系统无法识别
             mv "$KERNEL_612_FILE" "${KERNEL_612_FILE}.bak"
             echo "✅ 已禁用kernel-6.12文件（重命名为${KERNEL_612_FILE}.bak）"
         fi
