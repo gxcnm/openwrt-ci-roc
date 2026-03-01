@@ -86,7 +86,7 @@ jobs:
         # ====================== 第一步：验证当前Commit的实际文件结构 ======================
         echo -e "\n===== 【验证1】当前实际文件结构 ====="
         echo -e "\n📌 target/linux/${TARGET_PLATFORM}"
-         target/linux/${TARGET_PLATFORM}
+        ls -la target/linux/${TARGET_PLATFORM}
         echo "📌 target/linux/${TARGET_PLATFORM}/Makefile 关键内容："
         cat target/linux/${TARGET_PLATFORM}/Makefile
         # grep "KERNEL_PATCHVER" target/linux/${TARGET_PLATFORM}/Makefile || echo "⚠️ 无KERNEL_PATCHVER"
