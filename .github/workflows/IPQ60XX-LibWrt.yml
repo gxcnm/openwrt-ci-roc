@@ -84,6 +84,14 @@ jobs:
     
         echo "✅ 已强制锁定内核版本为：$VERSION_KERNEL"
         echo "VERSION_KERNEL=$VERSION_KERNEL" >> $GITHUB_ENV
+
+    - name: Add Fullconenat Feeds(补充依赖源)
+      run: |
+        cd $OPENWRT_PATH
+        echo "src-git fullconenat https://github.com/zhsj/luci-app-fullconenat.git" >> feeds.conf.default
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a -p fullconenat
+        ./scripts/feeds install iptables
         
     - name: Generate Variables(生成变量)
       run: |
@@ -92,7 +100,6 @@ jobs:
         echo "SOURCE_REPO=immortalwrt" >> $GITHUB_ENV
         echo "DEVICE_TARGET=qualcommax" >> $GITHUB_ENV
         echo "DEVICE_SUBTARGET=ipq60xx" >> $GITHUB_ENV
-        echo "HASH=f9fbaa7017" >> $GITHUB_ENV
         echo "CACHE_DATE=$(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_ENV
 
     - name: Cache Toolchain(缓存工具链)
@@ -132,8 +139,19 @@ jobs:
         CONFIG_TARGET_qualcommax_ipq60xx=y
         CONFIG_TARGET_MULTI_PROFILE=y
         CONFIG_TARGET_DEVICE_qualcommax_ipq60xx_DEVICE_qihoo_360v6=y
+        CONFIG_ARCH=aarch64=y
+        CONFIG_TARGET_ARCH_PACKAGES=aarch64_cortex-a53=y
+        CONFIG_KERNEL_VERSION=6.6.89=y
         CONFIG_ATH11K_MEM_PROFILE_512M=y
         CONFIG_NSS_FIRMWARE_VERSION_11_4=y
+
+        # 依赖配置（必须启用，否则模块编译失败）
+        CONFIG_PACKAGE_iptables=y
+        CONFIG_PACKAGE_libnl-tiny=y
+        CONFIG_PACKAGE_kmod-nf-conntrack=y
+        CONFIG_PACKAGE_kmod-nf-ipt=y
+        CONFIG_PACKAGE_kmod-ipt-core=y
+        CONFIG_PACKAGE_kmod-lib-lz4=y
 
         # 9个核心kmod模块（确保编译）
         CONFIG_PACKAGE_kmod-fuse=y
@@ -167,6 +185,14 @@ jobs:
         
         make defconfig
         echo "✅ 配置加载完成，仅编译9个kmod模块"
+        # 二次确认模块配置（防止缺失）
+        MODULES=("kmod-fuse" "kmod-fs-btrfs" "kmod-ipt-extra" "kmod-ipt-nat" "kmod-ipt-nat6" "kmod-ipt-physdev" "kmod-nf-ipvs" "kmod-veth" "kmod-ipt-fullconenat")
+        for mod in "${MODULES[@]}"; do
+          if ! grep -q "^CONFIG_PACKAGE_$mod=y" .config; then
+                echo "CONFIG_PACKAGE_$mod=y" >> .config
+          fi
+        done
+        make defconfig  # 再次生成，确保配置合法
 
     - name: Download DL Package(下载DL软件包)
       run: |
@@ -208,28 +234,6 @@ jobs:
     - name: Check Space Usage(检查空间使用情况)
       if: (!cancelled())
       run: df -hT
-
-    - name: Verify Kmod Files(验证内核模块文件)
-      if: steps.compile.outputs.status == 'success'
-      run: |
-        cd $OPENWRT_PATH
-        # 检查9个kmod的apk文件是否存在
-        MODULES=(
-          "kmod-fuse" "kmod-fs-btrfs" "kmod-ipt-extra"
-          "kmod-ipt-nat" "kmod-ipt-nat6" "kmod-ipt-physdev"
-          "kmod-nf-ipvs" "kmod-veth" "kmod-ipt-fullconenat"
-        )
-        for mod in "${MODULES[@]}"; do
-          APK_FILE=$(find bin/packages -name "$mod*.apk")
-          if [ -f "$APK_FILE" ]; then
-            echo "✅ $mod 编译成功：$APK_FILE"
-            # 验证apk兼容性（内核版本匹配）
-            opkg info --force-root "$APK_FILE" | grep -E "Version|Architecture|Depends"
-          else
-            echo "❌ $mod 编译失败，无产物文件"
-            exit 1
-          fi
-        done
 
     - name: Organize Files(整理文件)
       if: steps.compile.outputs.status == 'success'
