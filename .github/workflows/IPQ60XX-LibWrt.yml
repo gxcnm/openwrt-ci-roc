@@ -84,14 +84,6 @@ jobs:
     
         echo "✅ 已强制锁定内核版本为：$VERSION_KERNEL"
         echo "VERSION_KERNEL=$VERSION_KERNEL" >> $GITHUB_ENV
-
-    - name: Add Fullconenat Feeds(补充依赖源)
-      run: |
-        cd $OPENWRT_PATH
-        echo "src-git fullconenat https://github.com/zhsj/luci-app-fullconenat.git" >> feeds.conf.default
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a -p fullconenat
-        ./scripts/feeds install iptables
         
     - name: Generate Variables(生成变量)
       run: |
@@ -185,14 +177,6 @@ jobs:
         
         make defconfig
         echo "✅ 配置加载完成，仅编译9个kmod模块"
-        # 二次确认模块配置（防止缺失）
-        MODULES=("kmod-fuse" "kmod-fs-btrfs" "kmod-ipt-extra" "kmod-ipt-nat" "kmod-ipt-nat6" "kmod-ipt-physdev" "kmod-nf-ipvs" "kmod-veth" "kmod-ipt-fullconenat")
-        for mod in "${MODULES[@]}"; do
-          if ! grep -q "^CONFIG_PACKAGE_$mod=y" .config; then
-                echo "CONFIG_PACKAGE_$mod=y" >> .config
-          fi
-        done
-        make defconfig  # 再次生成，确保配置合法
 
     - name: Download DL Package(下载DL软件包)
       run: |
