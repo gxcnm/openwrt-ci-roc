@@ -76,7 +76,7 @@ jobs:
         TARGET_KERNEL_MAIN="6.6"
         TARGET_KERNEL_FULL="6.6.89"
 
-        禁用6.12内核配置（彻底避免混淆）
+        # 禁用6.12内核配置（彻底避免混淆）
         KERNEL_612_FILE="target/linux/generic/kernel-6.12"
         if [ -f "$KERNEL_612_FILE" ]; then
             mv "$KERNEL_612_FILE" "${KERNEL_612_FILE}.bak"
