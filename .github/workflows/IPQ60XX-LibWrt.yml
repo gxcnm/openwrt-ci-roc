@@ -77,16 +77,25 @@ jobs:
         TARGET_KERNEL_FULL="6.6.89"    # 完整版本
         TARGET_PLATFORM="qualcommax"   # IPQ60XX所属平台
         TARGET_SUBPLATFORM="ipq60xx"   # 子平台
+
+        # ====================== 第一步：验证当前Commit的内核文件（关键排查） ======================
+        echo -e "\n===== 【验证1】当前Commit的内核配置文件 ====="
+        ls -la target/linux/generic/
         
         # ====================== 第一步：验证当前Commit的实际文件结构 ======================
         echo -e "\n===== 【验证1】当前实际文件结构 ====="
+        echo -e "\n📌 target/linux/${TARGET_PLATFORM}"
+        ls -la target/linux/${TARGET_PLATFORM}
         echo "📌 target/linux/${TARGET_PLATFORM}/Makefile 关键内容："
-        grep "KERNEL_PATCHVER" target/linux/${TARGET_PLATFORM}/Makefile || echo "⚠️ 无KERNEL_PATCHVER"
-        echo -e "\n📌 target/linux/${TARGET_PLATFORM}/config-6.12 关键标识："
-        grep "CONFIG_LINUX_6_12" target/linux/${TARGET_PLATFORM}/config-6.12 || echo "⚠️ 无6.12专属标识"
+        cat target/linux/${TARGET_PLATFORM}/Makefile
+        # grep "KERNEL_PATCHVER" target/linux/${TARGET_PLATFORM}/Makefile || echo "⚠️ 无KERNEL_PATCHVER"
+        echo -e "\n📌 target/linux/${TARGET_PLATFORM}/config-6.6 关键内容:"
+        cat target/linux/${TARGET_PLATFORM}/config-6.6
+        # grep "CONFIG_LINUX_6_12" target/linux/${TARGET_PLATFORM}/config-6.12 || echo "⚠️ 无6.12专属标识"
         echo -e "\n📌 target/linux/${TARGET_PLATFORM}/${TARGET_SUBPLATFORM}/config-default 关键配置："
-        grep "CONFIG_IPQ_GCC_6018" target/linux/${TARGET_PLATFORM}/${TARGET_SUBPLATFORM}/config-default || echo "⚠️ 无IPQ6018配置"
-        
+        cat target/linux/${TARGET_PLATFORM}/${TARGET_SUBPLATFORM}/config-default
+        # grep "CONFIG_IPQ_GCC_6018" target/linux/${TARGET_PLATFORM}/${TARGET_SUBPLATFORM}/config-default || echo "⚠️ 无IPQ6018配置"
+        exit 1
         # ====================== 第二步：手动创建kernel-6.6文件（核心） ======================
         echo -e "\n===== 开始创建kernel-${TARGET_KERNEL_MAIN}文件（强制6.6.89） ====="
         KERNEL_66_FILE="target/linux/generic/kernel-${TARGET_KERNEL_MAIN}"
