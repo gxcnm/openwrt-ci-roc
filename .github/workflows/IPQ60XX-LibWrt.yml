@@ -6,8 +6,8 @@ on:
 
 env:
   REPO_URL: https://github.com/LiBwrt/openwrt-6.x
-  REPO_BRANCH: ''
-  REPO_COMMIT: f9fbaa7017
+  REPO_BRANCH: master
+  COMMIT_HASH: f9fbaa70172fc5fd27377910004a83cf8557dce5
   CONFIG_FILE: configs/IPQ60XX.config
   GENERAL_CONFIG_FILE: configs/General.config
   DIY_SCRIPT: scripts/Roc-script.sh
@@ -58,59 +58,150 @@ jobs:
         df -hT $GITHUB_WORKSPACE
         sudo mkdir -p /mnt/openwrt
         sudo chown -R $(id -u):$(id -g) /mnt/openwrt
-        # 修复1：完全克隆仓库（所有分支+所有提交历史，无任何限制）
+        
+        # 克隆仓库（全分支+完整历史，确保能找到目标Commit）
         git clone --no-single-branch --depth=1000 $REPO_URL /mnt/openwrt
         cd /mnt/openwrt
         
-        # 修复2：先拉取所有远程分支（关键！让本地识别所有分支的Commit）
-        git fetch --all
-        
-        # 修复3：验证Commit Hash（支持简写/完整Hash，优先查全仓库）
-        COMMIT_HASH="f9fbaa7017"
-        # 第一步：尝试直接解析简写Hash为完整Hash
-        FULL_HASH=$(git rev-parse --short=10 $COMMIT_HASH 2>/dev/null)
-        if [ -z "$FULL_HASH" ]; then
-          echo "❌ 错误：简写Hash $COMMIT_HASH 无法解析，尝试全仓库搜索..."
-          # 第二步：全仓库搜索该Hash（跨所有分支）
-          FULL_HASH=$(git log --all --pretty=format:"%H" | grep -i "$COMMIT_HASH" | head -1)
-          if [ -z "$FULL_HASH" ]; then
-                echo "❌ 致命错误：Commit $COMMIT_HASH 在仓库中不存在！"
-                echo "🔍 仓库所有分支的最近10个Commit（便于核对）："
-                git log --all --oneline -n 10
-                exit 1
-          fi
-        fi
-        
-        # 修复4：切换到完整Hash（避免简写匹配失败）
-        git checkout $FULL_HASH
-        echo "✅ 已成功切换到目标Commit（完整Hash）：$FULL_HASH"
+        # 精准切换到目标Commit
+        git checkout $COMMIT_HASH
+        echo "✅ 已成功切换到目标Commit（完整Hash）：$COMMIT_HASH"
         
         # 固化环境变量（用完整Hash）
-        echo "HASH=$FULL_HASH" >> $GITHUB_ENV
+        echo "HASH=$COMMIT_HASH" >> $GITHUB_ENV
         echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
         VERSION_INFO=$(git show -s --date=short --format="作者: %an<br/>时间: %cd<br/>内容: %s<br/>hash: %H")
         echo "VERSION_INFO=$VERSION_INFO" >> $GITHUB_ENV
+        # 定义目标内核版本（你需要的6.6.89）
+        TARGET_KERNEL_MAIN="6.6"       # 主版本
+        TARGET_KERNEL_FULL="6.6.89"    # 完整版本
+        TARGET_PLATFORM="qualcommax"   # IPQ60XX所属平台
+        TARGET_SUBPLATFORM="ipq60xx"   # 子平台
         
-        # ========== 内核版本锁定（6.6.89） ==========
-        echo "🔍 检测内核配置文件..."
-        KERNEL_FILE=$(find target/linux/generic/ -type f -name "kernel-6.6*" | head -1)
-        KERNEL_DIR=$(find target/linux/generic/ -type d -name "kernel-6.6*" | head -1)
-    
-        if [ -n "$KERNEL_DIR" ]; then
-            KERNEL_MAKEFILE="$KERNEL_DIR/Makefile"
-            sed -i "s/PKG_VERSION:=.*/PKG_VERSION:=6.6.89/" "$KERNEL_MAKEFILE"
-            sed -i "s/PKG_HASH:=.*/PKG_HASH:=skip/" "$KERNEL_MAKEFILE"
-            VERSION_KERNEL="6.6.89"
-        elif [ -n "$KERNEL_FILE" ]; then
-            sed -i "s/^.*/6.6.89/" "$KERNEL_FILE"
-            VERSION_KERNEL="6.6.89"
+        # ====================== 第一步：验证当前Commit的实际文件结构 ======================
+        echo -e "\n===== 【验证1】当前实际文件结构 ====="
+        echo "📌 target/linux/${TARGET_PLATFORM}/Makefile 关键内容："
+        grep "KERNEL_PATCHVER" target/linux/${TARGET_PLATFORM}/Makefile || echo "⚠️ 无KERNEL_PATCHVER"
+        echo -e "\n📌 target/linux/${TARGET_PLATFORM}/config-6.12 关键标识："
+        grep "CONFIG_LINUX_6_12" target/linux/${TARGET_PLATFORM}/config-6.12 || echo "⚠️ 无6.12专属标识"
+        echo -e "\n📌 target/linux/${TARGET_PLATFORM}/${TARGET_SUBPLATFORM}/config-default 关键配置："
+        grep "CONFIG_IPQ_GCC_6018" target/linux/${TARGET_PLATFORM}/${TARGET_SUBPLATFORM}/config-default || echo "⚠️ 无IPQ6018配置"
+        
+        # ====================== 第二步：手动创建kernel-6.6文件（核心） ======================
+        echo -e "\n===== 开始创建kernel-${TARGET_KERNEL_MAIN}文件（强制6.6.89） ====="
+        KERNEL_66_FILE="target/linux/generic/kernel-${TARGET_KERNEL_MAIN}"
+        
+        # 写入6.6.89的版本配置（OpenWRT标准格式）
+        cat > "$KERNEL_66_FILE" << EOF
+        # 手动指定6.6.89内核版本（覆盖Commit默认的6.12）
+        LINUX_VERSION-${TARGET_KERNEL_MAIN} = .${TARGET_KERNEL_FULL##*.}  # 提取89，格式为.89
+        LINUX_KERNEL_HASH-${TARGET_KERNEL_FULL} = skip  # 跳过哈希校验
+        EOF
+        
+        # 验证创建结果
+        echo -e "\n===== 【验证2】新建的kernel-${TARGET_KERNEL_MAIN}文件内容 ====="
+        cat "$KERNEL_66_FILE"
+        if [ -f "$KERNEL_66_FILE" ]; then
+            echo "✅ 成功创建kernel-${TARGET_KERNEL_MAIN}文件"
         else
-            echo "6.6.89" > target/linux/generic/kernel-6.6
-            VERSION_KERNEL="6.6.89"
+            echo "❌ 创建kernel-${TARGET_KERNEL_MAIN}文件失败！"
+            exit 1
         fi
-    
-        echo "✅ 已强制锁定内核版本为：$VERSION_KERNEL"
-        echo "VERSION_KERNEL=$VERSION_KERNEL" >> $GITHUB_ENV
+        
+        # ====================== 第三步：修改平台Makefile（适配你的文件） ======================
+        echo -e "\n===== 开始修改${TARGET_PLATFORM}平台Makefile ====="
+        PLATFORM_MAKEFILE="target/linux/${TARGET_PLATFORM}/Makefile"
+        
+        if [ -f "$PLATFORM_MAKEFILE" ]; then
+            # 备份原文件
+            cp "$PLATFORM_MAKEFILE" "$PLATFORM_MAKEFILE.bak"
+            echo "📝 已备份平台Makefile为：$PLATFORM_MAKEFILE.bak"
+        
+            # 验证原Makefile的KERNEL_PATCHVER
+            echo -e "\n===== 【验证3】原平台Makefile的KERNEL_PATCHVER ====="
+            grep "KERNEL_PATCHVER" "$PLATFORM_MAKEFILE"
+        
+            # 核心修改1：仅修改KERNEL_PATCHVER为6.6
+            sed -i "s/^KERNEL_PATCHVER:=.*/KERNEL_PATCHVER:=${TARGET_KERNEL_MAIN}/" "$PLATFORM_MAKEFILE"
+        
+            # 核心修改2：手动添加LINUX_VERSION（原文件无，必须加）
+            if ! grep -q "LINUX_VERSION-${TARGET_KERNEL_MAIN}" "$PLATFORM_MAKEFILE"; then
+                echo "LINUX_VERSION-${TARGET_KERNEL_MAIN} = ${TARGET_KERNEL_FULL}" >> "$PLATFORM_MAKEFILE"
+                echo "✅ 已添加LINUX_VERSION-${TARGET_KERNEL_MAIN} = ${TARGET_KERNEL_FULL}到平台Makefile"
+            fi
+        
+            # 验证修改后的Makefile
+            echo -e "\n===== 【验证4】修改后平台Makefile关键配置 ====="
+            grep -E "KERNEL_PATCHVER|LINUX_VERSION-${TARGET_KERNEL_MAIN}" "$PLATFORM_MAKEFILE"
+            echo "✅ 成功将${TARGET_PLATFORM}平台内核主版本改为${TARGET_KERNEL_MAIN}"
+        else
+            echo "❌ 未找到${TARGET_PLATFORM}平台Makefile！"
+            exit 1
+        fi
+        
+        # ====================== 第四步：补充6.6内核的config文件（核心适配你的config内容） ======================
+        echo -e "\n===== 开始补充6.6内核的config文件 ====="
+        
+        # 1. 处理qualcommax/config-6.6（基于你的config-6.12）
+        QUALCOMM_CONFIG_66="target/linux/${TARGET_PLATFORM}/config-${TARGET_KERNEL_MAIN}"
+        if [ -f "target/linux/${TARGET_PLATFORM}/config-6.12" ]; then
+            # 复制config-6.12为config-6.6
+            cp target/linux/${TARGET_PLATFORM}/config-6.12 "$QUALCOMM_CONFIG_66"
+            echo "✅ 已复制config-6.12为${QUALCOMM_CONFIG_66}"
+        
+            # ========== 关键修改：删除6.12专属配置，添加6.6专属配置 ==========
+            # a. 删除6.12内核专属标识（你的config-6.12中可能隐含，先清理）
+            sed -i "/CONFIG_LINUX_6_12/d" "$QUALCOMM_CONFIG_66"
+            # b. 添加6.6内核专属标识
+            echo "CONFIG_LINUX_6_6=y" >> "$QUALCOMM_CONFIG_66"
+            # c. 删除6.12专属的IPQ配置（你的config-6.12中禁用了IPQ6018，需启用）
+            sed -i "s/# CONFIG_IPQ_GCC_6018 is not set/CONFIG_IPQ_GCC_6018=y/" "$QUALCOMM_CONFIG_66"
+            sed -i "s/# CONFIG_PINCTRL_IPQ6018 is not set/CONFIG_PINCTRL_IPQ6018=y/" "$QUALCOMM_CONFIG_66"
+            # d. 适配6.6内核的关键修复（解决编译报错）
+            echo "CONFIG_MODULES=y" >> "$QUALCOMM_CONFIG_66"  # 启用模块编译（编译kmod必需）
+            echo "CONFIG_MODULE_UNLOAD=y" >> "$QUALCOMM_CONFIG_66"  # 支持模块卸载
+            echo "CONFIG_MODVERSIONS=y" >> "$QUALCOMM_CONFIG_66"  # 模块版本匹配（避免kmod版本报错）
+            echo "✅ 已适配config-6.6：删除6.12专属配置，启用IPQ6018，添加6.6模块编译配置"
+        else
+            touch "$QUALCOMM_CONFIG_66"
+            echo "✅ 已创建空的${QUALCOMM_CONFIG_66}文件"
+        fi
+        
+        # 2. 处理ipq60xx/config-6.6（基于你的config-default）
+        IPQ60XX_CONFIG_66="target/linux/${TARGET_PLATFORM}/${TARGET_SUBPLATFORM}/config-${TARGET_KERNEL_MAIN}"
+        if [ -f "target/linux/${TARGET_PLATFORM}/${TARGET_SUBPLATFORM}/config-default" ]; then
+            # 复制config-default为config-6.6
+            cp target/linux/${TARGET_PLATFORM}/${TARGET_SUBPLATFORM}/config-default "$IPQ60XX_CONFIG_66"
+            echo "✅ 已复制config-default为${IPQ60XX_CONFIG_66}"
+        
+            # ========== 关键修改：补充6.6内核和IPQ6018适配配置 ==========
+            echo -e "\n# 适配6.6内核的IPQ6018专属配置" >> "$IPQ60XX_CONFIG_66"
+            echo "CONFIG_LINUX_6_6=y" >> "$IPQ60XX_CONFIG_66"  # 6.6内核标识
+            echo "CONFIG_MODULES=y" >> "$IPQ60XX_CONFIG_66"    # 启用模块编译
+            echo "CONFIG_MODVERSIONS=y" >> "$IPQ60XX_CONFIG_66" # 模块版本匹配
+            echo "CONFIG_ARCH_QCOM=y" >> "$IPQ60XX_CONFIG_66"  # 高通架构
+            echo "CONFIG_ARM64=y" >> "$IPQ60XX_CONFIG_66"      # ARM64架构（IPQ60XX是ARM64）
+            echo "✅ 已适配ipq60xx/config-6.6：补充6.6内核和IPQ6018基础配置"
+        else
+            touch "$IPQ60XX_CONFIG_66"
+            echo "✅ 已创建空的${IPQ60XX_CONFIG_66}文件"
+        fi
+        
+        # ====================== 第五步：最终验证（确保配置生效） ======================
+        echo -e "\n===== 【最终验证】所有6.6.89内核配置 ====="
+        echo "📌 1. kernel-6.6文件内容："
+        cat "$KERNEL_66_FILE"
+        echo -e "\n📌 2. 平台Makefile关键配置："
+        grep -E "KERNEL_PATCHVER|LINUX_VERSION-${TARGET_KERNEL_MAIN}" "$PLATFORM_MAKEFILE"
+        echo -e "\n📌 3. qualcommax/config-6.6 关键适配项："
+        grep -E "CONFIG_LINUX_6_6|CONFIG_IPQ_GCC_6018|CONFIG_MODULES" "$QUALCOMM_CONFIG_66"
+        echo -e "\n📌 4. ipq60xx/config-6.6 关键适配项："
+        grep -E "CONFIG_LINUX_6_6|CONFIG_MODULES|CONFIG_ARM64" "$IPQ60XX_CONFIG_66"
+        
+        # 强制指定编译6.6内核的环境变量（兜底）
+        echo "export KERNEL_PATCHVER=${TARGET_KERNEL_MAIN}" >> $GITHUB_ENV
+        echo "export LINUX_VERSION=${TARGET_KERNEL_FULL}" >> $GITHUB_ENV
+        
         
     - name: Generate Variables(生成变量)
       run: |
