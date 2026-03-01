@@ -5,8 +5,8 @@ on:
   workflow_call:
 
 env:
-  REPO_URL: https://github.com/immortalwrt/immortalwrt
-  REPO_BRANCH: master
+  REPO_URL: https://github.com/LiBwrt/openwrt-6.x
+  REPO_BRANCH: ''
   REPO_COMMIT: f9fbaa7017
   CONFIG_FILE: configs/IPQ60XX.config
   GENERAL_CONFIG_FILE: configs/General.config
@@ -58,12 +58,37 @@ jobs:
         df -hT $GITHUB_WORKSPACE
         sudo mkdir -p /mnt/openwrt
         sudo chown -R $(id -u):$(id -g) /mnt/openwrt
-        git clone -b master --depth=1000 $REPO_URL /mnt/openwrt
+        # 修复1：完全克隆仓库（所有分支+所有提交历史，无任何限制）
+        git clone --no-single-branch --depth=1000 $REPO_URL /mnt/openwrt
         cd /mnt/openwrt
+        git fetch --all
+        
+        # 修复3：验证Commit Hash（支持简写/完整Hash，优先查全仓库）
+        COMMIT_HASH="f9fbaa7017"
+        # 第一步：尝试直接解析简写Hash为完整Hash
+        FULL_HASH=$(git rev-parse --short=10 $COMMIT_HASH 2>/dev/null)
+        if [ -z "$FULL_HASH" ]; then
+          echo "❌ 错误：简写Hash $COMMIT_HASH 无法解析，尝试全仓库搜索..."
+          # 第二步：全仓库搜索该Hash（跨所有分支）
+          FULL_HASH=$(git log --all --pretty=format:"%H" | grep -i "$COMMIT_HASH" | head -1)
+          if [ -z "$FULL_HASH" ]; then
+                echo "❌ 致命错误：Commit $COMMIT_HASH 在仓库中不存在！"
+                echo "🔍 仓库所有分支的最近10个Commit（便于核对）："
+                git log --all --oneline -n 10
+                exit 1
+          fi
+        fi
+        
+        # 修复4：切换到完整Hash（避免简写匹配失败）
+        git checkout $FULL_HASH
+        echo "✅ 已成功切换到目标Commit（完整Hash）：$FULL_HASH"
+        
+        # 固化环境变量（用完整Hash）
+        echo "HASH=$FULL_HASH" >> $GITHUB_ENV
         echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
         VERSION_INFO=$(git show -s --date=short --format="作者: %an<br/>时间: %cd<br/>内容: %s<br/>hash: %H")
         echo "VERSION_INFO=$VERSION_INFO" >> $GITHUB_ENV
-        echo "HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
+        
         # ========== 内核版本锁定（6.6.89） ==========
         echo "🔍 检测内核配置文件..."
         KERNEL_FILE=$(find target/linux/generic/ -type f -name "kernel-6.6*" | head -1)
