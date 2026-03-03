@@ -125,6 +125,7 @@ jobs:
         CONFIG_PACKAGE_kmod-nf-ipvs=y
         CONFIG_PACKAGE_kmod-veth=y
         CONFIG_PACKAGE_kmod-ipt-fullconenat=y
+        CONFIG_PACKAGE_kmod-nft-compat=y
 
         # 通用编译配置
         CONFIG_DEVEL=y
@@ -161,7 +162,7 @@ jobs:
         CONFIG_PACKAGE_luci-app-wifischedule=n
         CONFIG_PACKAGE_luci-app-uhttpd=y
         CONFIG_PACKAGE_luci-app-hd-idle=y
-        CONFIG_PACKAGE_luci-app-arpbind=y
+        CONFIG_PACKAGE_luci-app-arpbind=n
         CONFIG_PACKAGE_luci-app-usb-printer=n
         CONFIG_PACKAGE_luci-app-watchcat=n
         CONFIG_PACKAGE_luci-app-smartdns=n
@@ -174,10 +175,10 @@ jobs:
         CONFIG_PACKAGE_luci-i18n-athena-led-zh-cn=n
         CONFIG_PACKAGE_fdisk=y
         CONFIG_PACKAGE_cfdisk=y
-        CONFIG_PACKAGE_sgdisk=n
+        CONFIG_PACKAGE_sgdisk=y
         CONFIG_PACKAGE_nano-full=n
         CONFIG_PACKAGE_hdparm=n
-        CONFIG_PACKAGE_openssh-sftp-server=n
+        CONFIG_PACKAGE_openssh-sftp-server=y
         CONFIG_PACKAGE_luci-theme-aurora=y
         CONFIG_PACKAGE_luci-app-aurora-config=y
         CONFIG_PACKAGE_luci-app-ddns=n
@@ -191,7 +192,7 @@ jobs:
         CONFIG_PACKAGE_luci-app-sqm=n
         CONFIG_PACKAGE_luci-app-wechatpush=n
         CONFIG_PACKAGE_luci-app-3cat=n
-        CONFIG_PACKAGE_luci-app-passwall=n
+        CONFIG_PACKAGE_luci-app-passwall=y
         EOF
 
         # 进入源码目录，生成默认配置（验证语法）
@@ -220,52 +221,52 @@ jobs:
     - name: Organize Files(整理文件)
       if: steps.compile.outputs.status == 'success'
       run: |
-        # 精准定位固件路径（适配 openwrt-6.x.git 源码结构）
-        FIRMWARE_PATH=$(find $OPENWRT_PATH/bin/targets -type d -name "ipq60xx")
-        echo "FIRMWARE_PATH=$FIRMWARE_PATH" >> $GITHUB_ENV
-        # 复制配置文件和清单
-        cp $OPENWRT_PATH/.config $FIRMWARE_PATH/IPQ60XX.config
-        mv $FIRMWARE_PATH/config.buildinfo $FIRMWARE_PATH/IPQ60XX.config.buildinfo
-        mv $FIRMWARE_PATH/*.manifest $FIRMWARE_PATH/IPQ60XX.manifest
-        # 打包 APK 包（你需要的 kmod 模块）
-        mkdir -p $FIRMWARE_PATH/packages
-        cp $OPENWRT_PATH/bin/packages/aarch64_cortex-a53/base/*.apk $FIRMWARE_PATH/packages/
-        tar -zcf $FIRMWARE_PATH/IPQ60XX.Packages.tar.gz $FIRMWARE_PATH/packages
-        # 清理冗余文件
-        rm -rf $FIRMWARE_PATH/packages $FIRMWARE_PATH/feeds.buildinfo $FIRMWARE_PATH/version.buildinfo $FIRMWARE_PATH/sha256sums $FIRMWARE_PATH/profiles.json
+        cd $OPENWRT_PATH/bin/targets/*/*
+        cp $OPENWRT_PATH/.config IPQ60XX.config
+        mv config.buildinfo IPQ60XX.config.buildinfo
+        mv libwrt-qualcommax-ipq60xx.manifest IPQ60XX.manifest
+        mv -f $OPENWRT_PATH/bin/packages/*/*/*.apk packages
+        tar -zcf IPQ60XX.Packages.tar.gz packages
+        rm -rf packages feeds.buildinfo version.buildinfo sha256sums profiles.json
+        echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
 
-    # ========== 新增：上传Artifacts步骤（核心） ==========
-    - name: Upload Firmware to Artifacts(上传产物到Artifacts)
-      if: steps.compile.outputs.status == 'success'
-      uses: actions/upload-artifact@v4
+    - name: Upload Firmware To Artifact(将固件上传到Artifact)
+      if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE != 'true'
+      uses: actions/upload-artifact@main
       with:
-        name: 360V6-Firmware-${{ env.FILE_DATE }}
-        path: |
-          ${{ env.FIRMWARE_PATH }}/*
-          $OPENWRT_PATH/bin/packages/aarch64_cortex-a53/base/*.apk
-        retention-days: 90  # 产物保留90天，足够你下载
+        name: ${{ env.SOURCE_REPO }}-firmware-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ env.FILE_DATE }}
+        path: ${{ env.FIRMWARE_PATH }}
 
     - name: Upload Firmware To Release(发布固件)
-      if: steps.compile.outputs.status == 'success'
+      if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE == 'true'
       uses: ncipollo/release-action@main
       with:
-        name: ${{ env.DATE }} - 360V6 固件（含 kmod 缺失模块）
+        name: ${{ env.DATE }} for ${{ env.FIRMWARE_TAG }}
         allowUpdates: true
-        tag: 360V6-Firmware-${{ env.FILE_DATE }}
+        tag: ${{ env.FIRMWARE_TAG }}
         token: ${{ secrets.GITHUB_TOKEN }}
         artifacts: ${{ env.FIRMWARE_PATH }}/*
         body: |
-          ### 固件信息
-          - 适配设备：360V6（qihoo_360v6）
-          - 内核版本：${{ env.VERSION_KERNEL }}
-          - 包含模块：kmod-fuse、kmod-fs-btrfs 等9个缺失内核模块
-          - 默认地址：192.168.99.1（无密码）
+          **This is OpenWrt Firmware for ${{ env.FIRMWARE_TAG }}**
+          ### 📒 固件信息
+          - 这是开启全功能NSS的6.12内核固件，默认主题为Aurora；该固件在LibWrt的基础上，添加了额外的kmod包kmod-fuse、kmod-fs-btrfs、kmod-ipt-extra、kmod-ipt-nat、kmod-ipt-nat6、kmod-ipt-physdev、kmod-nf-ipvs、kmod-veth、kmod-ipt-fullconenat、kmod-nft-compat，并精简了一些软件，具体详见IPQ60XX.config和General.config。
+          - 💻 这是 ${{ env.FIRMWARE_TAG }} 平台使用的 OpenWrt 固件
+          - ⚽ 固件源码: ${{ env.REPO_URL }}
+          - 💝 源码分支: ${{ env.REPO_BRANCH }}
+          - 🌐 默认地址: **192.168.99.1**
+          - 🔑 默认密码: none
+          ### 🧊 固件版本
+          - 固件内核版本：**${{ env.VERSION_KERNEL }}**
+          - 固件编译前最后一次➦[主源码](${{ env.REPO_URL }})更新记录
+          - ${{ env.VERSION_INFO }}
 
     - name: Delete Old Cache(删除旧缓存)
       run: |
+        # 获取缓存列表并删除
         gh cache list --key ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}- --json key --jq '.[] | .key' | while read -r key; do
           gh cache delete "$key"
         done
+        # 输出缓存状态
         echo "========cache status========"
         echo "ccache: $(du -sh $OPENWRT_PATH/.ccache | cut -f 1)"
         echo "staging: $(du -sh $OPENWRT_PATH/staging_dir | cut -f 1)"
