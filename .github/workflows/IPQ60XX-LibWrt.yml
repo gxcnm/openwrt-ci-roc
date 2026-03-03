@@ -146,12 +146,39 @@ jobs:
         	option key '123456789'
         EOF
 
+    - name: Cache DL Packages(缓存下载的依赖包)
+      uses: actions/cache@main
+      with:
+        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-dl-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ env.HASH }}-${{ env.CACHE_DATE }}
+        restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-dl-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-
+        path: ${{ env.OPENWRT_PATH }}/dl
+    
     - name: Download DL Package(下载DL软件包)
       run: |
         cat $CONFIG_FILE $GENERAL_CONFIG_FILE > $OPENWRT_PATH/.config
         cd $OPENWRT_PATH
         make defconfig
         make download -j$(nproc)
+
+    - name: Cache Compiled Packages(缓存已编译的软件包)
+      uses: actions/cache@main
+      with:
+        key: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-packages-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ env.HASH }}-${{ env.CACHE_DATE }}
+        restore-keys: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-packages-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-
+        path: ${{ env.OPENWRT_PATH }}/staging_dir/packages
+
+    - name: Refresh Cache(刷新缓存时间戳)
+      run: |
+        # 刷新 DL 包缓存（可选，DL 包无需频繁刷新，主要刷新工具链/编译包）
+        if [ -d "$OPENWRT_PATH/dl" ]; then
+          touch $OPENWRT_PATH/dl/* 2>/dev/null || true
+        fi
+        # 刷新工具链/编译包缓存（核心：修复 stamp 目录时间戳）
+        if [ -d "$OPENWRT_PATH/staging_dir/packages" ]; then
+          find "$OPENWRT_PATH/staging_dir/packages" -type d -name "stamp" -not -path "*target*" | while read -r dir; do
+              find "$dir" -type f -exec touch {} +
+          done
+        fi
 
     - name: Compile Firmware(开始编译固件)
       id: compile
