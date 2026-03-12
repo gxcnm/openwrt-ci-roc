@@ -108,9 +108,9 @@ jobs:
     - name: 预置 WiFi配置
       run: |
         # 创建 OpenWRT 配置目录（对应系统 /etc/config 路径）
-        mkdir -p openwrt/files/etc/config
+        mkdir -p $OPENWRT_PATH/files/etc/config
         # 写入 WiFi 配置（替换为你的实际配置）
-        cat > openwrt/files/etc/config/wireless << 'EOF'
+        cat > $OPENWRT_PATH/files/etc/config/wireless << 'EOF'
         config wifi-device 'radio0'
         	option type 'mac80211'
         	option path 'platform/soc@0/c000000.wifi'
@@ -124,7 +124,7 @@ jobs:
         	option network 'lan'
         	option mode 'ap'
         	option ssid 'newifi_5G'
-        	option encryption 'psk2'
+        	option encryption 'psk2+ccmp'
         	option disabled '0'
         	option key '123456789'
         
@@ -132,7 +132,7 @@ jobs:
         	option type 'mac80211'
         	option path 'platform/soc@0/c000000.wifi+1'
         	option band '2g'
-        	option channel '1'
+        	option channel '11'
         	option htmode 'HE20'
         	option cell_density '0'
         
@@ -141,7 +141,7 @@ jobs:
         	option network 'lan'
         	option mode 'ap'
         	option ssid 'newifi_2.4G'
-        	option encryption 'psk2'
+        	option encryption 'psk2+ccmp'
         	option disabled '0'
         	option key '123456789'
         EOF
