@@ -228,7 +228,9 @@ jobs:
         body: |
           **This is OpenWrt Firmware for ${{ env.FIRMWARE_TAG }}**
           ### 📒 固件信息
-          - 这是开启全功能NSS的6.12内核固件，默认主题为Aurora；该固件在LibWrt的基础上，添加了额外的kmod包kmod-fuse、kmod-fs-btrfs、kmod-ipt-extra、kmod-ipt-nat、kmod-ipt-nat6、kmod-ipt-physdev、kmod-nf-ipvs、kmod-veth、kmod-ipt-fullconenat、kmod-nft-compat，并精简了一些软件，具体详见IPQ60XX.config和General.config。
+          - 这是开启全功能NSS的6.12内核固件，默认主题为Aurora；该固件在LibWrt的基础上，添加了额外的kmod包
+            kmod-fuse、kmod-fs-btrfs、kmod-ipt-extra、kmod-ipt-nat、kmod-ipt-nat6、kmod-ipt-physdev、kmod-nf-ipvs、
+            kmod-veth、kmod-ipt-fullconenat、kmod-nft-compat、kmod-sound-core、kmod-fs-nfs、kmod-fs-nfsd、kmod-fs-ksmbd，并精简了一些软件，具体详见IPQ60XX.config和General.config。
           - 💻 这是 ${{ env.FIRMWARE_TAG }} 平台使用的 OpenWrt 固件
           - ⚽ 固件源码: ${{ env.REPO_URL }}
           - 💝 源码分支: ${{ env.REPO_BRANCH }}
